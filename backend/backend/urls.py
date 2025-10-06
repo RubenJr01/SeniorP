@@ -7,6 +7,6 @@ urlpatterns = [
     path('admin/', admin.site.urls),
     path('api/user/register/', CreateUserView.as_view(), name="register"), # Linking register page/view
     path('api/token/', TokenObtainPairView.as_view(), name="grab_token"), # Linking token-grab page/view
-    path('api/token/refresh/', TokenRefreshView.as_view, name="refresh_token"), # Linking refresh-token page/view
+    path('api/token/refresh/', TokenRefreshView.as_view(), name="refresh_token"), # Linking refresh-token page/view
     path('api-auth/', include("rest_framework.urls")), # Prebuilt rest_framework urls
 ]
