@@ -17,11 +17,15 @@ class UserSerializer(serializers.ModelSerializer):
 class EventSerializer(serializers.ModelSerializer):
   class Meta:
     model = Event
-    fields = ["id", "title", "description", "start", "end", "all_day", "created_at", "updated_at"]
-    read_only_f = ["created_at", "updated_at"]
-    
-  # Current user attached
-  def create(self, validate_data):
-    request = self.context.get("request")
-    return Event.objects.create(pilot=request.user, **validate_data)
-    
+    fields = [
+      "id",
+      "title",
+      "description",
+      "start",
+      "end",
+      "all_day",
+      "created_at",
+      "updated_at",
+      "pilot",
+    ]
+    read_only_fields = ["created_at", "updated_at", "pilot"]

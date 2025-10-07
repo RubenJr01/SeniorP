@@ -17,6 +17,9 @@ class EventListCreate(generics.ListCreateAPIView): #List all events/create event
     ctx = super().get_serializer_context()
     ctx.update({"request": self.request})
     return ctx
+  
+  def perform_create(self, serializer):
+    serializer.save(pilot=self.request.user)
       
 class EventModification(generics.RetrieveUpdateDestroyAPIView):
   serializer_class = EventSerializer
