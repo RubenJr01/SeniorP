@@ -1,8 +1,32 @@
 from django.shortcuts import render
 from django.contrib.auth.models import User
 from rest_framework import generics
-from .serializers import UserSerializer
+from .serializers import UserSerializer, EventSerializer
 from rest_framework.permissions import IsAuthenticated, AllowAny
+from .models import Event
+
+# Creating event
+class EventListCreate(generics.ListCreateAPIView): #List all events/create events
+  serializer_class = EventSerializer
+  permission_classes = [IsAuthenticated] # Can't call route unless you're authenticated
+  
+  def get_queryset(self):
+    user = self.request.user
+    return Event.objects.filter(pilot=user) # Only able to view events written by user
+  
+  def create_event(self, serializer):
+    if serializer.is_valid():
+      serializer.save(pilot=self.request.user)
+    else:
+      print(serializer.errors)
+      
+class EventModification(generics.RetrieveUpdateDestroyAPIView):
+  serializer_class = EventSerializer
+  permission_classes = [IsAuthenticated]
+  
+  def get_queryset(self):
+    user = self.request.user
+    return Event.objects.filter(pilot=user)
 
 # Allowing to make registration form
 class CreateUserView(generics.CreateAPIView):
