@@ -3,5 +3,5 @@ from . import views
 
 urlpatterns = [
   path("events/", views.EventListCreate.as_view(), name="event-list"),
-  path("event/delete/<int:pk>/", views.EventModification.as_view(), name="event-modify")
+  path("events/<int:pk>/", views.EventModification.as_view(), name="event-detail")
 ]

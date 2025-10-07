@@ -81,7 +81,7 @@ export default function Dashboard() {
   const onDelete = async (id) => {
     if (!confirm("Delete this event?")) return;
     try {
-      await api.delete(`/api/event/delete/${id}/`);
+      await api.delete(`/api/events/${id}/`);
       setEvents((evs) => evs.filter((e) => e.id !== id));
     } catch {
       alert("Delete failed.");
