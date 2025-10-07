@@ -2,7 +2,6 @@ import { useEffect, useState } from "react";
 import api from "../api";
 
 function isoLocal(date) {
-  // helper to format to YYYY-MM-DDTHH:mm for input[type=datetime-local]
   const pad = (n) => String(n).padStart(2, "0");
   const d = new Date(date);
   const y = d.getFullYear();
@@ -31,7 +30,7 @@ export default function Dashboard() {
       setLoading(true);
       const { data } = await api.get("/api/events/");
       setEvents(data);
-    } catch (e) {
+    } catch {
       setError("Failed to load events.");
     } finally {
       setLoading(false);
@@ -55,7 +54,6 @@ export default function Dashboard() {
     setSubmitting(true);
     setError("");
 
-    // Build payload that API expects (ISO strings)
     const payload = {
       title: form.title.trim(),
       description: form.description.trim(),
@@ -63,7 +61,6 @@ export default function Dashboard() {
       start: new Date(form.start).toISOString(),
       end: new Date(form.end).toISOString(),
     };
-    // If all_day, make end = start end-of-day (optional UX tweak)
     if (payload.all_day) {
       const s = new Date(payload.start);
       s.setHours(23, 59, 59, 999);
@@ -74,7 +71,7 @@ export default function Dashboard() {
       await api.post("/api/events/", payload);
       setForm((f) => ({ ...f, title: "", description: "" }));
       await fetchEvents();
-    } catch (e) {
+    } catch {
       setError("Could not create event.");
     } finally {
       setSubmitting(false);
@@ -86,7 +83,7 @@ export default function Dashboard() {
     try {
       await api.delete(`/api/event/delete/${id}/`);
       setEvents((evs) => evs.filter((e) => e.id !== id));
-    } catch (e) {
+    } catch {
       alert("Delete failed.");
     }
   };
@@ -164,7 +161,7 @@ export default function Dashboard() {
       <section style={{ marginTop: "2rem" }}>
         <h2 style={{ marginBottom: "0.5rem" }}>My Events</h2>
         {loading ? (
-          <p>Loading…</p>
+          <p>Loading...</p>
         ) : events.length === 0 ? (
           <p>No events yet.</p>
         ) : (
@@ -209,7 +206,7 @@ export default function Dashboard() {
                       </div>
                     )}
                     <div style={{ fontSize: 13, opacity: 0.8, marginTop: 4 }}>
-                      {new Date(ev.start).toLocaleString()} →{" "}
+                      {new Date(ev.start).toLocaleString()} -{" "}
                       {new Date(ev.end).toLocaleString()}
                     </div>
                   </div>
