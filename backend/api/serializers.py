@@ -29,3 +29,11 @@ class EventSerializer(serializers.ModelSerializer):
       "pilot",
     ]
     read_only_fields = ["created_at", "updated_at", "pilot"]
+
+  def validate(self, attrs):
+    instance = getattr(self, "instance", None)
+    start = attrs.get("start", getattr(instance, "start", None))
+    end = attrs.get("end", getattr(instance, "end", None))
+    if start and end and end < start:
+      raise serializers.ValidationError({"end": "End must be >= start."})
+    return attrs

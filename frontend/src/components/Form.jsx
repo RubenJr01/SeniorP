@@ -8,6 +8,7 @@ function Form({ route, method }) {
   const [username, setUsername] = useState("");
   const [password, setPassword] = useState("");
   const [loading, setLoading] = useState(false);
+  const [error, setError] = useState("");
   const navigate = useNavigate();
 
   const name = method === "login" ? "Login" : "Register";
@@ -15,6 +16,7 @@ function Form({ route, method }) {
   const handleSubmit = async (e) => {
     e.preventDefault();
     setLoading(true);
+    setError("");
 
     try {
       const resp = await api.post(route, { username, password });
@@ -26,7 +28,14 @@ function Form({ route, method }) {
         navigate("/login");
       }
     } catch (error) {
-      alert(error);
+      let msg = "Request failed.";
+      if (error.response?.data) {
+        const data = error.response.data;
+        msg = typeof data === "string" ? data : Object.values(data).flat().join(" ");
+      } else if (error.message) {
+        msg = error.message;
+      }
+      setError(msg);
     } finally {
       setLoading(false);
     }
@@ -54,6 +63,7 @@ function Form({ route, method }) {
       <button className="form-button" type="submit" disabled={loading}>
         {loading ? "Loading..." : name}
       </button>
+      {error && <p className="form-error">{error}</p>}
     </form>
   );
 }
