@@ -11,22 +11,19 @@ class EventListCreate(generics.ListCreateAPIView): #List all events/create event
   permission_classes = [IsAuthenticated] # Can't call route unless you're authenticated
   
   def get_queryset(self):
-    user = self.request.user
-    return Event.objects.filter(pilot=user) # Only able to view events written by user
+    return Event.objects.filter(pilot=self.request.user).order_by("-start")
   
-  def create_event(self, serializer):
-    if serializer.is_valid():
-      serializer.save(pilot=self.request.user)
-    else:
-      print(serializer.errors)
+  def get_serializer_context(self):
+    ctx = super().get_serializer_context()
+    ctx.update({"request": self.request})
+    return ctx
       
 class EventModification(generics.RetrieveUpdateDestroyAPIView):
   serializer_class = EventSerializer
   permission_classes = [IsAuthenticated]
   
   def get_queryset(self):
-    user = self.request.user
-    return Event.objects.filter(pilot=user)
+    return Event.objects.filter(pilot=self.request.user)
 
 # Allowing to make registration form
 class CreateUserView(generics.CreateAPIView):
