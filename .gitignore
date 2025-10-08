@@ -65,3 +65,32 @@ ehthumbs.db
 Icon?
 *.swp
 *.swo
+
+# --- Secrets / credentials ---
+.env
+.env.*
+*.env
+*.pem
+*.key
+frontend/.env
+
+# --- Local databases ---
+*.sqlite3
+db.sqlite3
+backend/db.sqlite3
+
+# --- Virtual environments ---
+.venv/
+venv/
+ENV/
+env/
+
+# --- Django collected/static & uploads
+staticfiles/
+media/
+
+# --- Frontend artifacts ---
+node_modules/
+frontend/node_modules/
+frontend/dist/
+frontend/.vite/
