@@ -1,0 +1,17 @@
+# backend/Dockerfile.dev
+FROM python:3.11-slim
+
+ENV PYTHONDONTWRITEBYTECODE=1 \
+    PYTHONUNBUFFERED=1
+
+WORKDIR /app
+
+# Install Python deps first (cache-friendly)
+COPY requirements.txt .
+RUN pip install --upgrade pip && pip install -r requirements.txt
+
+# Copy the rest of the backend code
+COPY . .
+
+# Default command (overridden by docker-compose)
+CMD ["python", "manage.py", "runserver", "0.0.0.0:8000"]

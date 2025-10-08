@@ -1,0 +1,14 @@
+FROM node:20-alpine
+
+WORKDIR /usr/src/app
+
+# Install dependencies first so they are cached between builds
+COPY package.json package-lock.json ./
+RUN npm ci
+
+# Copy the rest of the source; this gets replaced by the bind mount at runtime
+COPY . .
+
+# Expose the dev server port and start Vite in host-accessible mode
+EXPOSE 5173
+CMD ["npm", "run", "dev", "--", "--host", "0.0.0.0", "--port", "5173"]

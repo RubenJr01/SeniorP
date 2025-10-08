@@ -12,6 +12,25 @@ This project is a full-stack calendar application that uses a Vite/React fronten
 
 ---
 
+## 0. Containerised Development (Recommended)
+
+Spin up the Django API and Vite dev server purely with Docker so every teammate has the same setup (hot reload stays enabled).
+
+1. Copy the example environment files and populate real values:
+   - `cp .env.example .env` (optional: override the Postgres username/password/DB name)
+   - `cp backend/.env.example backend/.env`
+   - `cp frontend/.env.example frontend/.env` (optional: only needed if you want `VITE_API_URL` outside compose)
+2. Edit `backend/.env` with a unique `DJANGO_SECRET_KEY`, Google credentials, and any custom origins. Update `.env` if you want Postgres creds other than the defaults.
+3. Start the dev stack:
+   ```bash
+   docker compose up --build
+   ```
+4. Compose brings up Postgres (`db`), Django API (`backend`), and Vite dev server (`frontend`). Backend runs at <http://localhost:8000/> and the React app at <http://localhost:5173/>.
+
+The containers mount your local code (`backend/`, `frontend/`) so edits refresh instantly. Dependencies stay inside the containers, keeping secrets out of git and avoiding version conflicts on host machines.
+
+---
+
 ## 1. Clone the Repository
 
 ```bash

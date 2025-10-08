@@ -1,0 +1,57 @@
+version: "3.9"
+
+services:
+  db:
+    image: postgres:16-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: ${POSTGRES_DB:-calendar}
+      POSTGRES_USER: ${POSTGRES_USER:-calendar}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-change-this-password}
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-calendar}"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres-data:/var/lib/postgresql/data
+
+  backend:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile.dev
+    ports:
+      - "8000:8000"
+    env_file:
+      - ./backend/.env # reuse the same env file you use locally
+    environment:
+      POSTGRES_HOST: ${POSTGRES_HOST:-db}
+      POSTGRES_PORT: ${POSTGRES_PORT:-5432}
+    volumes:
+      - ./backend:/app # live-reload Django code
+    depends_on:
+      db:
+        condition: service_healthy
+    command: >
+      sh -c "until python manage.py migrate; do sleep 1; done &&
+             python manage.py runserver 0.0.0.0:8000"
+
+  frontend:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile.dev
+    environment:
+      - VITE_API_URL=http://localhost:8000 # browser needs to hit host-exposed backend
+    ports:
+      - "5173:5173"
+    volumes:
+      - ./frontend:/usr/src/app # live-reload React code
+      - /usr/src/app/node_modules # keep container node_modules
+    depends_on:
+      backend:
+        condition: service_started
+
+volumes:
+  postgres-data:
