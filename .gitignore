@@ -25,6 +25,10 @@ htmlcov/
 venv/
 ENV/
 env/
+backend/.env
+backend/env/
+backend/.venv/
+backend/db.sqlite3-journal
 
 # Django
 db.sqlite3
@@ -61,4 +65,3 @@ ehthumbs.db
 Icon?
 *.swp
 *.swo
-

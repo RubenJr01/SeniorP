@@ -1,4 +1,5 @@
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
+import { useLocation } from "react-router-dom";
 import api from "../api";
 
 function isoLocal(date) {
@@ -12,20 +13,40 @@ function isoLocal(date) {
   return `${y}-${m}-${day}T${h}:${min}`;
 }
 
-export default function Dashboard() {
-  const [events, setEvents] = useState([]);
-  const [loading, setLoading] = useState(true);
-  const [form, setForm] = useState({
+function isoDate(date) {
+  const d = new Date(date);
+  const y = d.getFullYear();
+  const m = String(d.getMonth() + 1).padStart(2, "0");
+  const day = String(d.getDate()).padStart(2, "0");
+  return `${y}-${m}-${day}`;
+}
+
+function createInitialForm() {
+  const now = new Date();
+  const inOneHour = new Date(now.getTime() + 60 * 60 * 1000);
+  return {
     title: "",
     description: "",
-    start: isoLocal(new Date()),
-    end: isoLocal(new Date(new Date().getTime() + 60 * 60 * 1000)),
+    startDateTime: isoLocal(now),
+    endDateTime: isoLocal(inOneHour),
+    startDate: isoDate(now),
     all_day: false,
-  });
+  };
+}
+
+export default function Dashboard() {
+  const location = useLocation();
+  const [events, setEvents] = useState([]);
+  const [loading, setLoading] = useState(true);
+  const [form, setForm] = useState(() => createInitialForm());
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState("");
+  const [googleStatus, setGoogleStatus] = useState({ connected: false });
+  const [googleLoading, setGoogleLoading] = useState(true);
+  const [googleWorking, setGoogleWorking] = useState(false);
+  const [googleMessage, setGoogleMessage] = useState(null);
 
-  const fetchEvents = async () => {
+  const fetchEvents = useCallback(async () => {
     try {
       setLoading(true);
       const { data } = await api.get("/api/events/");
@@ -35,18 +56,191 @@ export default function Dashboard() {
     } finally {
       setLoading(false);
     }
-  };
-
-  useEffect(() => {
-    fetchEvents();
   }, []);
 
+  const loadGoogleStatus = useCallback(async () => {
+    try {
+      setGoogleLoading(true);
+      const { data } = await api.get("/api/google/status/");
+      setGoogleStatus({
+        connected: data.connected,
+        email: data.email,
+        last_synced_at: data.last_synced_at,
+        scopes: data.scopes,
+      });
+    } catch {
+      setGoogleStatus({ connected: false });
+    } finally {
+      setGoogleLoading(false);
+    }
+  }, []);
+  useEffect(() => {
+    fetchEvents();
+  }, [fetchEvents]);
+
+  useEffect(() => {
+    loadGoogleStatus();
+  }, [loadGoogleStatus]);
+
+  useEffect(() => {
+    const params = new URLSearchParams(location.search);
+    const status = params.get("google_status");
+    if (!status) {
+      return;
+    }
+    if (status === "success") {
+      const imported = Number(params.get("imported") || 0);
+      const linked = Number(params.get("linked") || 0);
+      const deduped = Number(params.get("deduped") || 0);
+      const pieces = [];
+      if (imported > 0) {
+        pieces.push(`imported ${imported} new event${imported === 1 ? "" : "s"}`);
+      }
+      if (linked > 0) {
+        pieces.push(`linked ${linked} existing event${linked === 1 ? "" : "s"}`);
+      }
+      if (deduped > 0) {
+        pieces.push(`removed ${deduped} duplicate${deduped === 1 ? "" : "s"}`);
+      }
+      const suffix = pieces.length ? ` — ${pieces.join(", ")}` : "";
+      setGoogleMessage({
+        type: "success",
+        text: `Google Calendar connected${suffix}.`,
+      });
+      loadGoogleStatus();
+      fetchEvents();
+    } else {
+      const message = params.get("message") || "unknown_error";
+      setGoogleMessage({
+        type: "error",
+        text: `Google Calendar connection failed (${message}).`,
+      });
+    }
+    window.history.replaceState({}, "", location.pathname);
+  }, [location, loadGoogleStatus, fetchEvents]);
+
+  const connectGoogle = useCallback(async () => {
+    setGoogleWorking(true);
+    setGoogleMessage(null);
+    try {
+      const { data } = await api.post("/api/google/oauth/start/");
+      window.location.href = data.auth_url;
+    } catch {
+      setGoogleWorking(false);
+      setGoogleMessage({
+        type: "error",
+        text: "Could not start Google authorization. Please try again.",
+      });
+    }
+  }, []);
+
+  const syncGoogle = useCallback(async () => {
+    setGoogleWorking(true);
+    setGoogleMessage(null);
+    try {
+      const { data } = await api.post("/api/google/sync/");
+      const stats = data.stats || {};
+      const summaries = [
+        ["created", "created"],
+        ["updated", "updated"],
+        ["deleted", "deleted"],
+        ["pushed", "pushed"],
+        ["linked_existing", "linked existing"],
+        ["deduped", "removed duplicates"],
+        ["google_deleted", "deleted in Google"],
+      ];
+      const detailParts = summaries
+        .filter(([key]) => stats[key])
+        .map(([key, label]) => `${label} ${stats[key]}`);
+      const detailText =
+        detailParts.length > 0
+          ? detailParts.join(", ")
+          : "no changes detected";
+      setGoogleMessage({
+        type: "success",
+        text: `Google Calendar synced (${detailText}).`,
+      });
+      await fetchEvents();
+      await loadGoogleStatus();
+    } catch {
+      setGoogleMessage({
+        type: "error",
+        text: "Google sync failed.",
+      });
+    } finally {
+      setGoogleWorking(false);
+    }
+  }, [fetchEvents, loadGoogleStatus]);
+
+  const disconnectGoogle = useCallback(async () => {
+    setGoogleWorking(true);
+    setGoogleMessage(null);
+    try {
+      await api.delete("/api/google/disconnect/");
+      setGoogleMessage({
+        type: "success",
+        text: "Google Calendar disconnected.",
+      });
+      await loadGoogleStatus();
+    } catch {
+      setGoogleMessage({
+        type: "error",
+        text: "Failed to disconnect Google Calendar.",
+      });
+    } finally {
+      setGoogleWorking(false);
+    }
+  }, [loadGoogleStatus]);
   const onChange = (e) => {
     const { name, value, type, checked } = e.target;
-    setForm((f) => ({
-      ...f,
-      [name]: type === "checkbox" ? checked : value,
-    }));
+    setForm((f) => {
+      if (name === "all_day") {
+        if (checked) {
+          return { ...f, all_day: true, startDate: isoDate(f.startDateTime) };
+        }
+        return { ...f, all_day: false };
+      }
+      if (name === "startDate") {
+        if (!value) {
+          return { ...f, startDate: value };
+        }
+        const base = new Date(value);
+        if (Number.isNaN(base.getTime())) {
+          return { ...f, startDate: value };
+        }
+        const startDateTime = new Date(f.startDateTime);
+        startDateTime.setFullYear(base.getFullYear(), base.getMonth(), base.getDate());
+        const endDateTime = new Date(f.endDateTime);
+        endDateTime.setFullYear(base.getFullYear(), base.getMonth(), base.getDate());
+        return {
+          ...f,
+          startDate: value,
+          startDateTime: isoLocal(startDateTime),
+          endDateTime: isoLocal(endDateTime),
+        };
+      }
+      if (name === "startDateTime") {
+        let nextEnd = f.endDateTime;
+        const newStart = new Date(value);
+        if (!Number.isNaN(newStart.getTime())) {
+          const currentEnd = new Date(f.endDateTime);
+          if (Number.isNaN(currentEnd.getTime()) || currentEnd <= newStart) {
+            const bumped = new Date(newStart.getTime() + 60 * 60 * 1000);
+            nextEnd = isoLocal(bumped);
+          }
+        }
+        return {
+          ...f,
+          startDateTime: value,
+           endDateTime: nextEnd,
+          startDate: value ? isoDate(value) : f.startDate,
+        };
+      }
+      return {
+        ...f,
+        [name]: type === "checkbox" ? checked : value,
+      };
+    });
   };
 
   const onSubmit = async (e) => {
@@ -54,22 +248,51 @@ export default function Dashboard() {
     setSubmitting(true);
     setError("");
 
+    let startDate;
+    let endDate;
+
+    if (form.all_day) {
+      if (!form.startDate) {
+        setError("Please choose a date.");
+        setSubmitting(false);
+        return;
+      }
+      const day = new Date(form.startDate);
+      if (Number.isNaN(day.getTime())) {
+        setError("Invalid date selected.");
+        setSubmitting(false);
+        return;
+      }
+      day.setHours(0, 0, 0, 0);
+      startDate = day;
+      endDate = new Date(day);
+      endDate.setHours(23, 59, 59, 999);
+    } else {
+      startDate = new Date(form.startDateTime);
+      endDate = new Date(form.endDateTime);
+      if (Number.isNaN(startDate.getTime()) || Number.isNaN(endDate.getTime())) {
+        setError("Please provide valid start and end times.");
+        setSubmitting(false);
+        return;
+      }
+      if (endDate < startDate) {
+        setError("End must be after start.");
+        setSubmitting(false);
+        return;
+      }
+    }
+
     const payload = {
       title: form.title.trim(),
       description: form.description.trim(),
       all_day: !!form.all_day,
-      start: new Date(form.start).toISOString(),
-      end: new Date(form.end).toISOString(),
+      start: startDate.toISOString(),
+      end: endDate.toISOString(),
     };
-    if (payload.all_day) {
-      const s = new Date(payload.start);
-      s.setHours(23, 59, 59, 999);
-      payload.end = s.toISOString();
-    }
 
     try {
       await api.post("/api/events/", payload);
-      setForm((f) => ({ ...f, title: "", description: "" }));
+      setForm(() => createInitialForm());
       await fetchEvents();
     } catch {
       setError("Could not create event.");
@@ -104,6 +327,52 @@ export default function Dashboard() {
       </header>
 
       <section style={{ marginTop: "1.5rem" }}>
+        <h2 style={{ marginBottom: "0.75rem" }}>Google Calendar</h2>
+        {googleMessage && (
+          <div
+            style={{
+              padding: "0.75rem 1rem",
+              borderRadius: 6,
+              backgroundColor: googleMessage.type === "success" ? "#ecfdf5" : "#fcebea",
+              color: googleMessage.type === "success" ? "#047857" : "#b91c1c",
+              marginBottom: "0.75rem",
+            }}
+          >
+            {googleMessage.text}
+          </div>
+        )}
+        {googleLoading ? (
+          <p>Checking Google connection…</p>
+        ) : googleStatus.connected ? (
+          <div style={{ display: "flex", flexDirection: "column", gap: "0.5rem" }}>
+            <p style={{ margin: 0 }}>
+              Connected as <strong>{googleStatus.email}</strong>
+              {googleStatus.last_synced_at && (
+                <span style={{ display: "block", fontSize: 13, opacity: 0.8 }}>
+                  Last sync: {new Date(googleStatus.last_synced_at).toLocaleString()}
+                </span>
+              )}
+            </p>
+            <div style={{ display: "flex", gap: "0.5rem", flexWrap: "wrap" }}>
+              <button onClick={syncGoogle} disabled={googleWorking}>
+                {googleWorking ? "Working..." : "Sync now"}
+              </button>
+              <button onClick={disconnectGoogle} disabled={googleWorking}>
+                Disconnect
+              </button>
+            </div>
+          </div>
+        ) : (
+          <div style={{ display: "flex", flexDirection: "column", gap: "0.5rem" }}>
+            <p style={{ margin: 0 }}>Not connected to Google Calendar.</p>
+            <button onClick={connectGoogle} disabled={googleWorking}>
+              {googleWorking ? "Working..." : "Connect Google Calendar"}
+            </button>
+          </div>
+        )}
+      </section>
+
+      <section style={{ marginTop: "1.5rem" }}>
         <h2 style={{ marginBottom: "0.75rem" }}>Create Event</h2>
         <form onSubmit={onSubmit} style={{ display: "grid", gap: "0.75rem" }}>
           <input
@@ -122,24 +391,41 @@ export default function Dashboard() {
           />
           <label>
             Start:&nbsp;
-            <input
-              type="datetime-local"
-              name="start"
-              value={form.start}
-              onChange={onChange}
-              required
-            />
+            {!form.all_day ? (
+              <input
+                type="datetime-local"
+                name="startDateTime"
+                value={form.startDateTime}
+                onChange={onChange}
+                required
+              />
+            ) : (
+              <input
+                type="date"
+                name="startDate"
+                value={form.startDate}
+                onChange={onChange}
+                required
+              />
+            )}
           </label>
-          <label>
-            End:&nbsp;
-            <input
-              type="datetime-local"
-              name="end"
-              value={form.end}
-              onChange={onChange}
-              required
-            />
-          </label>
+          {!form.all_day && (
+            <label>
+              End:&nbsp;
+              <input
+                type="datetime-local"
+                name="endDateTime"
+                value={form.endDateTime}
+                onChange={onChange}
+                required
+              />
+            </label>
+          )}
+          {form.all_day && (
+            <small style={{ color: "#4b5563" }}>
+              End of day is applied automatically for all-day events.
+            </small>
+          )}
           <label
             style={{ display: "inline-flex", alignItems: "center", gap: 8 }}
           >
@@ -193,6 +479,20 @@ export default function Dashboard() {
                 >
                   <div>
                     <strong>{ev.title}</strong>
+                    {ev.source !== "local" && (
+                      <span
+                        style={{
+                          marginLeft: 8,
+                          fontSize: 12,
+                          backgroundColor: "#eef2ff",
+                          color: "#3730a3",
+                          padding: "2px 6px",
+                          borderRadius: 4,
+                        }}
+                      >
+                        {ev.source === "google" ? "Google" : "Synced"}
+                      </span>
+                    )}
                     {ev.all_day && (
                       <span
                         style={{ marginLeft: 8, fontSize: 12, opacity: 0.75 }}
