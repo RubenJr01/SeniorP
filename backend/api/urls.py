@@ -1,13 +1,10 @@
-from django.urls import path
+from django.urls import path, include
+from rest_framework.routers import DefaultRouter
+from .views import EventViewSet
 
-from . import views
+router = DefaultRouter()
+router.register(r"events", EventViewSet, basename="event")
 
 urlpatterns = [
-  path("events/", views.EventListCreate.as_view(), name="event-list"),
-  path("events/<int:pk>/", views.EventModification.as_view(), name="event-detail"),
-  path("google/oauth/start/", views.GoogleOAuthStartView.as_view(), name="google-oauth-start"),
-  path("google/oauth/callback/", views.GoogleOAuthCallbackView.as_view(), name="google-oauth-callback"),
-  path("google/status/", views.GoogleStatusView.as_view(), name="google-status"),
-  path("google/sync/", views.GoogleSyncNowView.as_view(), name="google-sync"),
-  path("google/disconnect/", views.GoogleDisconnectView.as_view(), name="google-disconnect"),
+    path("", include(router.urls)),
 ]

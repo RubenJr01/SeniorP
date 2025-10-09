@@ -1,75 +1,62 @@
-from datetime import timedelta, timezone as dt_timezone
-
 from django.contrib.auth.models import User
 from django.utils import timezone
 from rest_framework import serializers
-
 from .models import Event
 
-# ORM: Object Relational Mapping
 class UserSerializer(serializers.ModelSerializer):
-  class Meta:
-    model = User # Built into django
-    fields = ["id", "username", "password"]
-    extra_kwargs = {"password": {"write_only": True}} # Accepts the password when creating user, but dont return password when giving info about user
-    
-  def create(self, validated_data):
-    user = User.objects.create_user(**validated_data)
-    return user
+    # Register a new user with a hashed password
+    class Meta:
+        model = User
+        fields = ("id", "username", "password")
+        extra_kwargs = {"password": {"write_only": True}}
 
+    def create(self, validated_data):
+        user = User(username=validated_data["username"])
+        user.set_password(validated_data["password"])
+        user.save()
+        return user
 
 class EventSerializer(serializers.ModelSerializer):
-  class Meta:
-    model = Event
-    fields = [
-      "id",
-      "title",
-      "description",
-      "start",
-      "end",
-      "all_day",
-      "source",
-      "google_event_id",
-      "google_ical_uid",
-      "google_updated",
-      "created_at",
-      "updated_at",
-      "pilot",
-    ]
-    read_only_fields = [
-      "created_at",
-      "updated_at",
-      "pilot",
-      "source",
-      "google_event_id",
-      "google_ical_uid",
-      "google_updated",
-    ]
+    # Expose pilot as ID, but don't allow client to set it
+    pilot = serializers.PrimaryKeyRelatedField(read_only=True)
+    # Show the pilot's username
+    pilot_username = serializers.CharField(source="pilot.username", read_only=True)
 
-  def validate(self, attrs):
-    instance = getattr(self, "instance", None)
-    start = attrs.get("start", getattr(instance, "start", None))
-    end = attrs.get("end", getattr(instance, "end", None))
-    all_day = attrs.get("all_day", getattr(instance, "all_day", False))
+    class Meta:
+        model = Event
+        fields = (
+            "id",
+            "title",
+            "description",
+            "start",
+            "end",
+            "location",
+            "pilot",
+            "pilot_username",
+            "created_at",
+            "updated_at",
+        )
 
-    if all_day and start:
-      if timezone.is_naive(start):
-        start = timezone.make_aware(start, dt_timezone.utc)
-      tz = start.tzinfo or dt_timezone.utc
-      start = start.astimezone(tz).replace(hour=0, minute=0, second=0, microsecond=0)
-      end = start + timedelta(days=1) - timedelta(microseconds=1)
-      attrs["start"] = start
-      attrs["end"] = end
-    else:
-      if start and timezone.is_naive(start):
-        start = timezone.make_aware(start, dt_timezone.utc)
-        attrs["start"] = start
-      if end:
-        if timezone.is_naive(end):
-          tz = start.tzinfo if start else dt_timezone.utc
-          end = timezone.make_aware(end, tz)
-        attrs["end"] = end
+        read_only_fields = ("id", "pilot", "pilot_username", "created_at", "updated_at")
+        extra_kwargs = {
+            "description": {"required": False, "allow_blank": True},
+            "location": {"required": False, "allow_blank": True},
+        }
 
-    if start and end and end < start:
-      raise serializers.ValidationError({"end": "End must be >= start."})
-    return attrs
+    def validate(self, attrs):
+        start = attrs.get("start")
+        end = attrs.get("end")
+
+        if start and timezone.is_naive(start):
+            attrs["start"] = timezone.make_aware(start, timezone.get_current_timezone())
+            start = attrs["start"]
+
+        if end and timezone.is_naive(end):
+            attrs["end"] = timezone.make_aware(end, start.tzinfo if start else timezone.get_current_timezone())
+            end = attrs["end"]
+
+        if start and end and end < start:
+            raise serializers.ValidationError({"end": "End must be greater or equal to Start"})
+
+        return attrs
+

@@ -1,11 +1,10 @@
 import { defineConfig } from 'vite'
 import react from '@vitejs/plugin-react'
 
-// cloudflared tunnel for toDateString();
-const TUNNEL_HOST = 'eva-cayman-wright-watt.trycloudflare.com'
+const TUNNEL_HOST = 'compression-olympus-discovery-layout.trycloudflare.com'
 
 // https://vite.dev/config/
-export default defineConfig({
+export default defineConfig ({
   plugins: [react()],
   server: {
     host: true,
