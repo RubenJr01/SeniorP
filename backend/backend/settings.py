@@ -32,10 +32,9 @@ SECRET_KEY = os.getenv("DJANGO_SECRET_KEY", "dev-secret-key")
 DEBUG = os.getenv("DJANGO_DEBUG", "True").lower() == "true"
 
 ALLOWED_HOSTS = [
-    "https://eva-cayman-wright-watt.trycloudflare.com/",
-    "localhost", "127.0.0.1"
+    "filled-pmid-laboratory-throat.trycloudflare.com",
+    "localhost", "127.0.0.1",
 ]
-
 
 REST_FRAMEWORK = {
     "DEFAULT_AUTHENTICATION_CLASSES": (
@@ -68,9 +67,8 @@ INSTALLED_APPS = [
 
 MIDDLEWARE = [
     'django.middleware.security.SecurityMiddleware',
+    'corsheaders.middleware.CorsMiddleware',
     'django.contrib.sessions.middleware.SessionMiddleware',
-    # CORS middleware should be placed as high as possible, before CommonMiddleware
-    'corsheaders.middleware.CorsMiddleware', *MIDDLEWARE
     'django.middleware.common.CommonMiddleware',
     'django.middleware.csrf.CsrfViewMiddleware',
     'django.contrib.auth.middleware.AuthenticationMiddleware',
@@ -150,7 +148,7 @@ STATIC_URL = 'static/'
 
 DEFAULT_AUTO_FIELD = 'django.db.models.BigAutoField'
 
-CORS_ALLOW_ALL_ORIGINS = DEBUG
+CORS_ALLOW_ALL_ORIGINS = False
 
 CORS_ALLOWED_ORIGINS = [
     "https://eva-cayman-wright-watt.trycloudflare.com"
