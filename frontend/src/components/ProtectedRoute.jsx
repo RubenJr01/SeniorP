@@ -14,10 +14,16 @@ function ProtectedRoute({ children }) {
 
   // Getting refresh token, TRY to send response to root, with token, which should give back another access token
   const refreshToken = async () => {
-    const refreshToken = localStorage.getItem(REFRESH_TOKEN);
+    const storedRefresh = localStorage.getItem(REFRESH_TOKEN);
+    if (!storedRefresh) {
+      localStorage.removeItem(ACCESS_TOKEN);
+      localStorage.removeItem(REFRESH_TOKEN);
+      setIsAuthorized(false);
+      return;
+    }
     try {
       const resp = await api.post("/api/token/refresh/", {
-        refresh: refreshToken,
+        refresh: storedRefresh,
       });
       if (resp.status === 200) {
         localStorage.setItem(ACCESS_TOKEN, resp.data.access);
@@ -26,7 +32,9 @@ function ProtectedRoute({ children }) {
         setIsAuthorized(false);
       }
     } catch (error) {
-      console.log(error);
+      console.error(error);
+      localStorage.removeItem(ACCESS_TOKEN);
+      localStorage.removeItem(REFRESH_TOKEN);
       setIsAuthorized(false);
     }
   };
@@ -38,7 +46,16 @@ function ProtectedRoute({ children }) {
       setIsAuthorized(false);
       return;
     }
-    const decoded = jwtDecode(token);
+    let decoded;
+    try {
+      decoded = jwtDecode(token);
+    } catch (error) {
+      console.error("Failed to decode access token", error);
+      localStorage.removeItem(ACCESS_TOKEN);
+      localStorage.removeItem(REFRESH_TOKEN);
+      setIsAuthorized(false);
+      return;
+    }
     const tokenExpiration = decoded.exp;
     const now = Date.now() / 1000;
 

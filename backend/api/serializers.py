@@ -30,17 +30,24 @@ class EventSerializer(serializers.ModelSerializer):
             "description",
             "start",
             "end",
-            "location",
+            "all_day",
+            "source",
             "pilot",
             "pilot_username",
             "created_at",
             "updated_at",
         )
 
-        read_only_fields = ("id", "pilot", "pilot_username", "created_at", "updated_at")
+        read_only_fields = (
+            "id",
+            "pilot",
+            "pilot_username",
+            "source",
+            "created_at",
+            "updated_at",
+        )
         extra_kwargs = {
             "description": {"required": False, "allow_blank": True},
-            "location": {"required": False, "allow_blank": True},
         }
 
     def validate(self, attrs):
@@ -59,4 +66,3 @@ class EventSerializer(serializers.ModelSerializer):
             raise serializers.ValidationError({"end": "End must be greater or equal to Start"})
 
         return attrs
-

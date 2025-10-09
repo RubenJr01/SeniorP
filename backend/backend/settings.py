@@ -3,17 +3,23 @@ from pathlib import Path
 from datetime import timedelta
 import os
 
+from dotenv import load_dotenv
+
 BASE_DIR = Path(__file__).resolve().parent.parent
+
+# Load environment variables from .env files if present (local dev convenience)
+load_dotenv(BASE_DIR / ".env")
+load_dotenv(BASE_DIR / "backend" / ".env")
 
 # --- Env flags ---
 SECRET_KEY = os.getenv("DJANGO_SECRET_KEY", "dev-secret-key")
 DEBUG = os.getenv("DJANGO_DEBUG", "True").lower() == "true"
 
 # !!! EDIT THESE TWO with your real subdomains !!!
-FRONTEND_TUNNEL = "compression-olympus-discovery-layout.trycloutflare"
-BACKEND_TUNNEL  = "filled-pmid-laboratory-throat.trycloudflare.com"
+FRONTEND_TUNNEL = "compression-olympus-discovery-layout.trycloudflare.com"
+BACKEND_TUNNEL = "filled-pmid-laboratory-throat.trycloudflare.com"
 
-ALLOWED_HOSTS = [BACKEND_TUNNEL, "localhost", "127.0.0.1"]
+ALLOWED_HOSTS = [host for host in (BACKEND_TUNNEL, "localhost", "127.0.0.1") if host]
 
 # --- Apps ---
 INSTALLED_APPS = [
@@ -97,27 +103,37 @@ SIMPLE_JWT = {
     "REFRESH_TOKEN_LIFETIME": timedelta(days=1),
 }
 
-# --- CORS / CSRF for tunnels ---
-CORS_ALLOW_ALL_ORIGINS = False
-CORS_ALLOWED_ORIGINS = [f"https://{FRONTEND_TUNNEL}"]
-CORS_ALLOW_CREDENTIALS = False  # set True only if you use cookies for auth
-CORS_ALLOW_HEADERS = ["Authorization", "Content-Type"]
-CORS_ALLOW_METHODS = ["GET", "POST", "PUT", "PATCH", "DELET", "OPTIONS"]
-
-
-CSRF_TRUSTED_ORIGINS = [
-    f"https://{FRONTEND_TUNNEL}",
-    f"https://{BACKEND_TUNNEL}",
-]
-
-# --- Google placeholders (safe defaults) ---
+# --- Google / Frontend config ---
+FRONTEND_APP_URL = os.getenv("FRONTEND_APP_URL", "http://localhost:5173")
 GOOGLE_CLIENT_ID = os.getenv("GOOGLE_CLIENT_ID", "")
 GOOGLE_CLIENT_SECRET = os.getenv("GOOGLE_CLIENT_SECRET", "")
-GOOGLE_REDIRECT_URI = os.getenv("GOOGLE_REDIRECT_URI", "http://localhost:8000/api/google/oauth/callback/")
+GOOGLE_REDIRECT_URI = os.getenv(
+    "GOOGLE_REDIRECT_URI",
+    "http://localhost:8000/api/google/oauth/callback/",
+)
 GOOGLE_SCOPES = [
     "openid",
     "https://www.googleapis.com/auth/userinfo.email",
     "https://www.googleapis.com/auth/calendar",
 ]
 GOOGLE_OAUTH_PROMPT = os.getenv("GOOGLE_OAUTH_PROMPT", "consent")
-FRONTEND_APP_URL = os.getenv("FRONTEND_APP_URL", "http://localhost:5173")
+
+# --- CORS / CSRF for tunnels ---
+CORS_ALLOW_ALL_ORIGINS = False
+CORS_ALLOWED_ORIGINS = [
+    origin
+    for origin in (
+        FRONTEND_APP_URL,
+        f"https://{FRONTEND_TUNNEL}" if FRONTEND_TUNNEL else "",
+    )
+    if origin
+]
+CORS_ALLOW_CREDENTIALS = False  # set True only if you use cookies for auth
+CORS_ALLOW_HEADERS = ["Authorization", "Content-Type"]
+CORS_ALLOW_METHODS = ["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"]
+
+
+CSRF_TRUSTED_ORIGINS = [
+    f"https://{FRONTEND_TUNNEL}",
+    f"https://{BACKEND_TUNNEL}",
+]
