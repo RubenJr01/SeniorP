@@ -31,7 +31,11 @@ SECRET_KEY = os.getenv("DJANGO_SECRET_KEY", "dev-secret-key")
 # SECURITY WARNING: don't run with debug turned on in production!
 DEBUG = os.getenv("DJANGO_DEBUG", "True").lower() == "true"
 
-ALLOWED_HOSTS = ["*"]
+ALLOWED_HOSTS = [
+    "https://eva-cayman-wright-watt.trycloudflare.com/",
+    "localhost", "127.0.0.1"
+]
+
 
 REST_FRAMEWORK = {
     "DEFAULT_AUTHENTICATION_CLASSES": (
@@ -66,7 +70,7 @@ MIDDLEWARE = [
     'django.middleware.security.SecurityMiddleware',
     'django.contrib.sessions.middleware.SessionMiddleware',
     # CORS middleware should be placed as high as possible, before CommonMiddleware
-    'corsheaders.middleware.CorsMiddleware',
+    'corsheaders.middleware.CorsMiddleware', *MIDDLEWARE
     'django.middleware.common.CommonMiddleware',
     'django.middleware.csrf.CsrfViewMiddleware',
     'django.contrib.auth.middleware.AuthenticationMiddleware',
@@ -147,13 +151,16 @@ STATIC_URL = 'static/'
 DEFAULT_AUTO_FIELD = 'django.db.models.BigAutoField'
 
 CORS_ALLOW_ALL_ORIGINS = DEBUG
+
 CORS_ALLOWED_ORIGINS = [
-    o.strip() for o in os.getenv("DJANGO_CORS_ALLOWED_ORIGINS", "").split(",") if o.strip()
+    "https://eva-cayman-wright-watt.trycloudflare.com"
 ]
 # Using JWT via Authorization header, credentials are unnecessary.
 CORS_ALLOW_CREDENTIALS = False
+
 CSRF_TRUSTED_ORIGINS = [
-    o.strip() for o in os.getenv("DJANGO_CSRF_TRUSTED_ORIGINS", "").split(",") if o.strip()
+    "http://filled-pmid-laboratory-throat.trycloudflare.com",
+    "http://eva-cayman-wright-watt.trycloudflare.com"
 ]
 
 GOOGLE_CLIENT_ID = os.getenv("GOOGLE_CLIENT_ID", "")
