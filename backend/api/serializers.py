@@ -31,6 +31,8 @@ class EventSerializer(serializers.ModelSerializer):
             "start",
             "end",
             "all_day",
+            "recurrance",
+           # "recurrance_period",
             "source",
             "pilot",
             "pilot_username",

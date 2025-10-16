@@ -22,6 +22,8 @@ class Migration(migrations.Migration):
                 ('start', models.DateTimeField()),
                 ('end', models.DateTimeField()),
                 ('all_day', models.DateTimeField(verbose_name=bool)),
+                ('recurrance', models.DateTimeField(verbose_name=bool)),
+                # ('recurrance_period', models.IntegerField(min_value=1, max_value=7)),
                 ('created_at', models.DateTimeField(auto_now_add=True)),
                 ('updated_at', models.DateTimeField(auto_now=True)),
                 ('pilot', models.ForeignKey(on_delete=django.db.models.deletion.CASCADE, related_name='events', to=settings.AUTH_USER_MODEL)),

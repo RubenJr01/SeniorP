@@ -67,6 +67,45 @@ class EventAPITests(APITestCase):
         self.assertEqual(event.pilot, self.user)
         self.assertFalse(event.all_day)
 
+    def test_create_event_sets_pilot_and_recurrance_flag(self):
+        self.authenticate(self.user)
+        url = reverse("event-list")
+        start = timezone.now() + timedelta(days=2)
+        payload = {
+            "title": "Trip",
+            "description": "Day trip",
+            "start": start.isoformat(),
+            "end": (start + timedelta(hours=2)).isoformat(),
+            "recurrance": False,
+        }
+        response = self.client.post(url, payload, format="json")
+        self.assertEqual(response.status_code, status.HTTP_201_CREATED)
+        created_id = response.data["id"]
+        event = Event.objects.get(pk=created_id)
+        self.assertEqual(event.pilot, self.user)
+        self.assertFalse(event.recurrance)
+
+   # def test_create_event_sets_reccurance_period_and_recurrance_flag(self):
+   #     self.authenticate(self.user)
+   #     url = reverse("event-list")
+   #     start = timezone.now() + timedelta(days=2)
+   #     payload = {
+   #         "title": "Trip",
+   #         "description": "Day trip",
+   #         "start": start.isoformat(),
+   #         "end": (start + timedelta(hours=2)).isoformat(),
+   #         "recurrance": False,
+   #         "reccurance_period": 7,
+   #     }
+   #     response = self.client.post(url, payload, format="json")
+   #     self.assertEqual(response.status_code, status.HTTP_201_CREATED)
+   #     created_id = response.data["id"]
+   #     event = Event.objects.get(pk=created_id)
+   #     self.assertEqual(event.pilot, self.user)
+   #     self.assertFalse(event.recurrance)
+   #     self.assertEqual(event.recurrance_period, 7)
+    
+
     def test_delete_event_removes_google_record(self):
         self.authenticate(self.user)
         self.own_event.google_event_id = "abc123"

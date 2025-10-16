@@ -3,7 +3,6 @@ from django.contrib.auth.models import User
 from django.core.exceptions import ValidationError
 from django.db.models import Q, F
 
-
 class Event(models.Model):
   class Source(models.TextChoices):
     LOCAL = "local", "Created in app"
@@ -16,6 +15,8 @@ class Event(models.Model):
   start = models.DateTimeField()
   end = models.DateTimeField()
   all_day = models.BooleanField(default=False)
+  recurrance = models.BooleanField(default=False)
+ # recurrance_period = models.IntegerField(min_value=1, max_value=7)
   source = models.CharField(
     max_length=20,
     choices=Source.choices,
