@@ -27,14 +27,12 @@
 }
 
 .app-nav__brand {
-  border: none;
-  background: transparent;
   font-weight: 700;
   font-size: 1.05rem;
   letter-spacing: 0.12em;
   text-transform: uppercase;
-  cursor: pointer;
   color: var(--text-primary);
+  cursor: default;
 }
 
 .app-nav__links {

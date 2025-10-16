@@ -9,7 +9,7 @@ export default function Landing() {
       <div className="landing-background" aria-hidden="true" />
       <div className="landing-shell">
         <header className="landing-header">
-          <div className="landing-logo">SeniorP</div>
+          <div className="landing-logo">V-Cal</div>
           <div className="landing-header-actions">
             <button
               type="button"
@@ -33,7 +33,7 @@ export default function Landing() {
             <span className="landing-badge">Mission ready toolkit</span>
             <h1>Coordinate sorties with clarity and confidence.</h1>
             <p>
-              SeniorP keeps crews aligned with a focused mission board, instant Google Calendar
+              V-Cal keeps crews aligned with a focused mission board, instant Google Calendar
               sync, and guard rails that make onboarding secure.
             </p>
             <dl className="landing-metrics">

@@ -10,12 +10,27 @@ class Event(models.Model):
     GOOGLE = "google", "Created in Google"
     SYNCED = "synced", "Synced between app and Google"
 
+  class RecurrenceFrequency(models.TextChoices):
+    NONE = "none", "Does not repeat"
+    DAILY = "daily", "Daily"
+    WEEKLY = "weekly", "Weekly"
+    MONTHLY = "monthly", "Monthly"
+    YEARLY = "yearly", "Yearly"
+
   pilot = models.ForeignKey(User, on_delete=models.CASCADE, related_name="events")
   title = models.CharField(max_length=250)
   description = models.TextField(blank=True)
   start = models.DateTimeField()
   end = models.DateTimeField()
   all_day = models.BooleanField(default=False)
+  recurrence_frequency = models.CharField(
+    max_length=10,
+    choices=RecurrenceFrequency.choices,
+    default=RecurrenceFrequency.NONE,
+  )
+  recurrence_interval = models.PositiveSmallIntegerField(default=1)
+  recurrence_count = models.PositiveIntegerField(null=True, blank=True)
+  recurrence_end_date = models.DateField(null=True, blank=True)
   source = models.CharField(
     max_length=20,
     choices=Source.choices,
@@ -35,6 +50,29 @@ class Event(models.Model):
   def clean(self):
     if self.start and self.end and self.end < self.start:
       raise ValidationError({"end": "End must be >= start."})
+
+    if self.recurrence_interval < 1:
+      raise ValidationError({"recurrence_interval": "Interval must be at least 1."})
+
+    if (
+      self.recurrence_frequency != self.RecurrenceFrequency.NONE
+      and self.recurrence_count is not None
+      and self.recurrence_count < 1
+    ):
+      raise ValidationError({"recurrence_count": "Count must be greater than zero."})
+
+    if (
+      self.recurrence_frequency != self.RecurrenceFrequency.NONE
+      and self.recurrence_end_date
+      and self.start
+      and self.recurrence_end_date < self.start.date()
+    ):
+      raise ValidationError({"recurrence_end_date": "End date must be after the start date."})
+
+    if self.recurrence_frequency == self.RecurrenceFrequency.NONE:
+      self.recurrence_interval = 1
+      self.recurrence_count = None
+      self.recurrence_end_date = None
 
   def save(self, *args, **kwargs):
     self.full_clean()

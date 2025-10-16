@@ -342,6 +342,7 @@
 }
 
 .dashboard-note {
+  display: block;
   margin: -0.2rem 0 0;
   font-size: 0.85rem;
   color: var(--text-secondary);
@@ -457,6 +458,11 @@
 .dashboard-tag--sync {
   background: rgba(34, 197, 94, 0.16);
   color: #166534;
+}
+
+.dashboard-tag--recurring {
+  background: rgba(244, 114, 182, 0.18);
+  color: #9d174d;
 }
 
 .dashboard-tag--muted {

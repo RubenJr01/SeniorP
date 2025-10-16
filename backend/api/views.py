@@ -1,8 +1,12 @@
 from urllib.parse import urlencode
+from datetime import datetime, timedelta
 
+from dateutil import parser as date_parser
+from dateutil import rrule
 from django.conf import settings
 from django.contrib.auth.models import User
 from django.http import HttpResponseRedirect
+from django.utils import timezone
 from rest_framework import generics, status, viewsets
 from rest_framework.permissions import AllowAny, IsAuthenticated
 from rest_framework.response import Response
@@ -18,7 +22,7 @@ from .google_calendar import (
     run_two_way_sync,
 )
 from .models import Event, GoogleAccount
-from .serializers import UserSerializer, EventSerializer
+from .serializers import UserSerializer, EventSerializer, EventOccurrenceSerializer
 
 class CreateUserView(generics.CreateAPIView):
     queryset = User.objects.all()
@@ -55,6 +59,124 @@ class EventViewSet(viewsets.ModelViewSet):
                 pass
 
         instance.delete()
+
+
+class EventOccurrencesView(APIView):
+    permission_classes = [IsAuthenticated]
+
+    def get(self, request):
+        now = timezone.now()
+        default_start = now - timedelta(days=1)
+        default_end = now + timedelta(days=90)
+
+        start_param = request.query_params.get("start")
+        end_param = request.query_params.get("end")
+
+        try:
+            window_start = date_parser.isoparse(start_param) if start_param else default_start
+            window_end = date_parser.isoparse(end_param) if end_param else default_end
+        except (ValueError, TypeError):
+            return Response(
+                {"detail": "Invalid start or end parameter. Use ISO 8601 format."},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        if timezone.is_naive(window_start):
+            window_start = timezone.make_aware(window_start, timezone.get_current_timezone())
+        if timezone.is_naive(window_end):
+            window_end = timezone.make_aware(window_end, timezone.get_current_timezone())
+
+        if window_end <= window_start:
+            return Response(
+                {"detail": "End must be after start."},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        max_span = now + timedelta(days=365)
+        if window_end > max_span:
+            window_end = max_span
+
+        events = Event.objects.filter(pilot=request.user).order_by("start")
+        occurrences = []
+
+        freq_map = {
+            Event.RecurrenceFrequency.DAILY: rrule.DAILY,
+            Event.RecurrenceFrequency.WEEKLY: rrule.WEEKLY,
+            Event.RecurrenceFrequency.MONTHLY: rrule.MONTHLY,
+            Event.RecurrenceFrequency.YEARLY: rrule.YEARLY,
+        }
+
+        for event in events:
+            event_duration = event.end - event.start
+            if event_duration.total_seconds() <= 0:
+                event_duration = timedelta(minutes=1)
+
+            if event.recurrence_frequency == Event.RecurrenceFrequency.NONE:
+                if event.end >= window_start and event.start <= window_end:
+                    occurrences.append(
+                        {
+                            "event_id": event.id,
+                            "occurrence_id": f"{event.id}:{event.start.isoformat()}",
+                            "title": event.title,
+                            "description": event.description,
+                            "start": event.start,
+                            "end": event.end,
+                            "all_day": event.all_day,
+                            "source": event.source,
+                            "is_recurring": False,
+                            "recurrence_frequency": event.recurrence_frequency,
+                            "recurrence_interval": event.recurrence_interval,
+                        }
+                    )
+                continue
+
+            rule_kwargs = {
+                "dtstart": event.start,
+                "interval": event.recurrence_interval,
+            }
+
+            if event.recurrence_count:
+                rule_kwargs["count"] = event.recurrence_count
+            if event.recurrence_end_date:
+                if event.all_day:
+                    end_time = datetime.combine(
+                        event.recurrence_end_date,
+                        datetime.max.time(),
+                        tzinfo=event.start.tzinfo,
+                    )
+                else:
+                    end_time = datetime.combine(
+                        event.recurrence_end_date,
+                        event.start.timetz(),
+                    )
+                rule_kwargs["until"] = end_time
+
+            rule = rrule.rrule(freq_map[event.recurrence_frequency], **rule_kwargs)
+            generated = 0
+            for occurrence_start in rule.between(window_start, window_end, inc=True):
+                occurrence_end = occurrence_start + event_duration
+                occurrences.append(
+                    {
+                        "event_id": event.id,
+                        "occurrence_id": f"{event.id}:{occurrence_start.isoformat()}",
+                        "title": event.title,
+                        "description": event.description,
+                        "start": occurrence_start,
+                        "end": occurrence_end,
+                        "all_day": event.all_day,
+                        "source": event.source,
+                        "is_recurring": True,
+                        "recurrence_frequency": event.recurrence_frequency,
+                        "recurrence_interval": event.recurrence_interval,
+                    }
+                )
+                generated += 1
+                if generated >= 200:
+                    break
+
+        occurrences.sort(key=lambda item: item["start"])
+        serializer = EventOccurrenceSerializer(occurrences, many=True)
+        return Response(serializer.data)
 
 
 class GoogleStatusView(APIView):

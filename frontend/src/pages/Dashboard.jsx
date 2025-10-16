@@ -33,7 +33,27 @@ function createInitialForm() {
     endDateTime: isoLocal(inOneHour),
     startDate: isoDate(now),
     all_day: false,
+    recurrence_enabled: false,
+    recurrence_frequency: "weekly",
+    recurrence_interval: 1,
   };
+}
+
+function formatRecurrenceLabel(frequency, interval) {
+  if (!frequency || frequency === "none") {
+    return "";
+  }
+  const unitMap = {
+    daily: "day",
+    weekly: "week",
+    monthly: "month",
+    yearly: "year",
+  };
+  const unit = unitMap[frequency] || "cycle";
+  if (interval === 1) {
+    return `Repeats every ${unit}`;
+  }
+  return `Repeats every ${interval} ${unit}${interval > 1 ? "s" : ""}`;
 }
 
 export default function Dashboard() {
@@ -48,10 +68,11 @@ export default function Dashboard() {
   const [googleWorking, setGoogleWorking] = useState(false);
   const [googleMessage, setGoogleMessage] = useState(null);
 
-  const fetchEvents = useCallback(async () => {
+  const fetchOccurrences = useCallback(async () => {
     try {
       setLoading(true);
-      const { data } = await api.get("/api/events/");
+      setError("");
+      const { data } = await api.get("/api/events/occurrences/");
       setEvents(data);
     } catch {
       setError("Failed to load events.");
@@ -78,8 +99,8 @@ export default function Dashboard() {
   }, []);
 
   useEffect(() => {
-    fetchEvents();
-  }, [fetchEvents]);
+    fetchOccurrences();
+  }, [fetchOccurrences]);
 
   useEffect(() => {
     loadGoogleStatus();
@@ -112,7 +133,7 @@ export default function Dashboard() {
         text: `Google Calendar connected${suffix}.`,
       });
       loadGoogleStatus();
-      fetchEvents();
+      fetchOccurrences();
     } else {
       const message = params.get("message") || "unknown_error";
       setGoogleMessage({
@@ -121,7 +142,7 @@ export default function Dashboard() {
       });
     }
     window.history.replaceState({}, "", location.pathname);
-  }, [location, loadGoogleStatus, fetchEvents]);
+  }, [location, loadGoogleStatus, fetchOccurrences]);
 
   const connectGoogle = useCallback(async () => {
     setGoogleWorking(true);
@@ -162,7 +183,7 @@ export default function Dashboard() {
         type: "success",
         text: `Google Calendar synced (${detailText}).`,
       });
-      await fetchEvents();
+      await fetchOccurrences();
       await loadGoogleStatus();
     } catch {
       setGoogleMessage({
@@ -172,7 +193,7 @@ export default function Dashboard() {
     } finally {
       setGoogleWorking(false);
     }
-  }, [fetchEvents, loadGoogleStatus]);
+  }, [fetchOccurrences, loadGoogleStatus]);
 
   const disconnectGoogle = useCallback(async () => {
     setGoogleWorking(true);
@@ -247,6 +268,28 @@ export default function Dashboard() {
           startDate: value ? isoDate(value) : f.startDate,
         };
       }
+      if (name === "recurrence_enabled") {
+        const enabled = !!checked;
+        return {
+          ...f,
+          recurrence_enabled: enabled,
+          recurrence_frequency: enabled ? f.recurrence_frequency || "weekly" : "weekly",
+          recurrence_interval: enabled ? f.recurrence_interval || 1 : 1,
+        };
+      }
+      if (name === "recurrence_frequency") {
+        return {
+          ...f,
+          recurrence_frequency: value,
+        };
+      }
+      if (name === "recurrence_interval") {
+        const parsed = Math.max(1, Number(value) || 1);
+        return {
+          ...f,
+          recurrence_interval: parsed,
+        };
+      }
       return {
         ...f,
         [name]: type === "checkbox" ? checked : value,
@@ -293,18 +336,23 @@ export default function Dashboard() {
       }
     }
 
+    const isRecurring = !!form.recurrence_enabled;
     const payload = {
       title: form.title.trim(),
       description: form.description.trim(),
       all_day: !!form.all_day,
       start: startDate.toISOString(),
       end: endDate.toISOString(),
+      recurrence_frequency: isRecurring ? form.recurrence_frequency : "none",
+      recurrence_interval: isRecurring ? Number(form.recurrence_interval || 1) : 1,
+      recurrence_count: null,
+      recurrence_end_date: null,
     };
 
     try {
       await api.post("/api/events/", payload);
       setForm(() => createInitialForm());
-      await fetchEvents();
+      await fetchOccurrences();
     } catch {
       setError("Could not create event.");
     } finally {
@@ -312,11 +360,14 @@ export default function Dashboard() {
     }
   };
 
-  const onDelete = async (id) => {
-    if (!window.confirm("Delete this event?")) return;
+  const onDelete = async (eventId, isRecurring) => {
+    const message = isRecurring
+      ? "Delete this entire recurring mission?"
+      : "Delete this mission?";
+    if (!window.confirm(message)) return;
     try {
-      await api.delete(`/api/events/${id}/`);
-      setEvents((evs) => evs.filter((e) => e.id !== id));
+      await api.delete(`/api/events/${eventId}/`);
+      await fetchOccurrences();
     } catch {
       window.alert("Delete failed.");
     }
@@ -325,19 +376,45 @@ export default function Dashboard() {
   const googleScopes = Array.isArray(googleStatus.scopes)
     ? googleStatus.scopes
     : [];
-  const hasEvents = events.length > 0;
   const sortedEvents = [...events].sort(
     (a, b) => new Date(a.start) - new Date(b.start),
   );
+  const groupedEvents = [];
+  const groupedMap = new Map();
+
+  sortedEvents.forEach((occurrence) => {
+    const key = occurrence.event_id;
+    const existing = groupedMap.get(key);
+    if (!existing) {
+      const groupEntry = {
+        ...occurrence,
+        occurrence_count: 1,
+      };
+      groupedMap.set(key, groupEntry);
+      groupedEvents.push(groupEntry);
+    } else {
+      existing.occurrence_count += 1;
+      if (new Date(occurrence.start) < new Date(existing.start)) {
+        existing.start = occurrence.start;
+        existing.end = occurrence.end;
+      }
+    }
+  });
+
+  const uniqueMissionCount = groupedEvents.length;
+  const hasEvents = uniqueMissionCount > 0;
   const eventCountLabel = hasEvents
-    ? `${events.length} ${events.length === 1 ? "mission" : "missions"}`
+    ? `${uniqueMissionCount} ${uniqueMissionCount === 1 ? "mission" : "missions"}`
     : "Chronological view of your activity.";
 
   const now = new Date();
   const nextEvent = sortedEvents.find((event) => new Date(event.end) > now);
   const nextEventTitle = nextEvent ? nextEvent.title : "No missions scheduled";
   const nextEventSummary = nextEvent
-    ? nextEvent.description || "Keep crew briefed and ready."
+    ? nextEvent.description ||
+      (nextEvent.is_recurring
+        ? formatRecurrenceLabel(nextEvent.recurrence_frequency, nextEvent.recurrence_interval)
+        : "Keep crew briefed and ready.")
     : "Create an event to populate your mission timeline.";
   const nextEventStart = nextEvent
     ? new Date(nextEvent.start).toLocaleString()
@@ -345,6 +422,10 @@ export default function Dashboard() {
   const nextEventEnd = nextEvent
     ? new Date(nextEvent.end).toLocaleString()
     : "";
+  const nextEventRecurrenceLabel =
+    nextEvent && nextEvent.is_recurring
+      ? formatRecurrenceLabel(nextEvent.recurrence_frequency, nextEvent.recurrence_interval)
+      : "";
 
   const googleStatusLabel = googleLoading
     ? "Checking..."
@@ -380,6 +461,7 @@ export default function Dashboard() {
             <div className="dashboard-hero-meta">
               <span>{nextEventStart}</span>
               {nextEventEnd && <span>{nextEventEnd}</span>}
+              {nextEventRecurrenceLabel && <span>{nextEventRecurrenceLabel}</span>}
             </div>
           </div>
         </section>
@@ -387,7 +469,7 @@ export default function Dashboard() {
         <section className="dashboard-stats">
           <article className="dashboard-stat">
             <span className="dashboard-stat-label">Scheduled missions</span>
-            <span className="dashboard-stat-value">{events.length}</span>
+            <span className="dashboard-stat-value">{uniqueMissionCount}</span>
             <p>{hasEvents ? "Active sorties on the board." : "No missions yet."}</p>
           </article>
           <article className="dashboard-stat">
@@ -557,20 +639,53 @@ export default function Dashboard() {
                     End of day is applied automatically for all-day events.
                   </p>
                 )}
-                <label className="dashboard-check">
-                  <input
-                    type="checkbox"
-                    name="all_day"
-                    checked={form.all_day}
-                    onChange={onChange}
-                  />
-                  <span>All day</span>
-                </label>
-                <button className="dashboard-button" type="submit" disabled={submitting}>
-                  {submitting ? "Saving..." : "Add mission"}
-                </button>
-                {error && <p className="dashboard-error">{error}</p>}
-              </form>
+              <label className="dashboard-check">
+                <input
+                  type="checkbox"
+                  name="all_day"
+                  checked={form.all_day}
+                  onChange={onChange}
+                />
+                <span>All day</span>
+              </label>
+              <label className="dashboard-check">
+                <input
+                  type="checkbox"
+                  name="recurrence_enabled"
+                  checked={form.recurrence_enabled}
+                  onChange={onChange}
+                />
+                <span>Recurring event</span>
+              </label>
+              {form.recurrence_enabled && (
+                <>
+                  <label className="dashboard-label">
+                    <span>Repeats</span>
+                    <select
+                      className="dashboard-input"
+                      name="recurrence_frequency"
+                      value={form.recurrence_frequency}
+                      onChange={onChange}
+                    >
+                      <option value="daily">Daily</option>
+                      <option value="weekly">Weekly</option>
+                      <option value="monthly">Monthly</option>
+                      <option value="yearly">Yearly</option>
+                    </select>
+                  </label>
+                  <span className="dashboard-note">
+                    {formatRecurrenceLabel(
+                      form.recurrence_frequency,
+                      form.recurrence_interval
+                    )}
+                  </span>
+                </>
+              )}
+              <button className="dashboard-button" type="submit" disabled={submitting}>
+                {submitting ? "Saving..." : "Add mission"}
+              </button>
+              {error && <p className="dashboard-error">{error}</p>}
+            </form>
             </section>
           </div>
 
@@ -590,8 +705,8 @@ export default function Dashboard() {
               </div>
             ) : (
               <ul className="dashboard-event-list">
-                {sortedEvents.map((ev) => (
-                  <li className="dashboard-event" key={ev.id}>
+                {groupedEvents.map((ev) => (
+                  <li className="dashboard-event" key={ev.event_id}>
                     <div className="dashboard-event-timeline">
                       <span className="dashboard-event-date">
                         {new Date(ev.start).toLocaleDateString()}
@@ -622,6 +737,11 @@ export default function Dashboard() {
                             {ev.source === "google" ? "Google" : "Synced"}
                           </span>
                         )}
+                        {ev.is_recurring && (
+                          <span className="dashboard-tag dashboard-tag--recurring">
+                            {formatRecurrenceLabel(ev.recurrence_frequency, ev.recurrence_interval)}
+                          </span>
+                        )}
                         {ev.all_day && (
                           <span className="dashboard-tag dashboard-tag--muted">
                             All day
@@ -635,7 +755,7 @@ export default function Dashboard() {
                     <button
                       type="button"
                       className="dashboard-button dashboard-button--ghost"
-                      onClick={() => onDelete(ev.id)}
+                      onClick={() => onDelete(ev.event_id, ev.is_recurring)}
                     >
                       Delete
                     </button>

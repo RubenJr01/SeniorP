@@ -7,7 +7,7 @@ function Register() {
     <main className="auth-page">
       <div className="auth-shell">
         <section className="auth-hero">
-          <div className="auth-brand">SeniorP</div>
+          <div className="auth-brand">V-Cal</div>
           <h2>Spin up your operations hub in minutes.</h2>
           <p>
             Create an account to capture sorties, coordinate teams, and unlock Google Calendar

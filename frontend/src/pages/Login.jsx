@@ -7,7 +7,7 @@ function Login() {
     <main className="auth-page">
       <div className="auth-shell">
         <section className="auth-hero">
-          <div className="auth-brand">SeniorP</div>
+          <div className="auth-brand">V-Cal</div>
           <h2>Focus on the flight deck, not admin screens.</h2>
           <p>
             Sign back in to coordinate missions, manage sorties, and keep every crew aligned with

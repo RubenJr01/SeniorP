@@ -2,6 +2,7 @@ from django.urls import path, include
 from rest_framework.routers import DefaultRouter
 from .views import (
     EventViewSet,
+    EventOccurrencesView,
     GoogleDisconnectView,
     GoogleOAuthCallbackView,
     GoogleOAuthStartView,
@@ -13,6 +14,7 @@ router = DefaultRouter()
 router.register(r"events", EventViewSet, basename="event")
 
 urlpatterns = [
+    path("events/occurrences/", EventOccurrencesView.as_view(), name="event-occurrences"),
     path("", include(router.urls)),
     path("google/status/", GoogleStatusView.as_view(), name="google-status"),
     path("google/oauth/start/", GoogleOAuthStartView.as_view(), name="google-oauth-start"),

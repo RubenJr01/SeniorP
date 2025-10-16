@@ -21,13 +21,12 @@ function Navigation() {
   return (
     <nav className={navClassName}>
       <div className="app-nav__inner">
-        <button
-          type="button"
+        <div
           className="app-nav__brand"
-          onClick={() => navigate(isAuthenticated ? "/dashboard" : "/")}
+          role="banner"
         >
-          SeniorP
-        </button>
+          V-Cal
+        </div>
 
         <div className="app-nav__links" role="navigation" aria-label="Primary">
           {!isAuthenticated && (
