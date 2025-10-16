@@ -14,6 +14,7 @@ function Form({ route, method, title, subtitle, submitLabel, footer }) {
   const isLogin = method === "login";
   const heading = title ?? (isLogin ? "Sign in" : "Create account");
   const buttonText = submitLabel ?? (isLogin ? "Continue" : "Create account");
+  const eyebrow = isLogin ? "Mission control access" : "Crew onboarding";
 
   const handleSubmit = async (e) => {
     e.preventDefault();
@@ -46,30 +47,45 @@ function Form({ route, method, title, subtitle, submitLabel, footer }) {
   return (
     <form onSubmit={handleSubmit} className="form-container">
       <div className="form-header">
+        <span className="form-eyebrow">{eyebrow}</span>
         <h1>{heading}</h1>
         {subtitle && <p>{subtitle}</p>}
       </div>
-      <input
-        className="form-input"
-        type="text"
-        value={username}
-        onChange={(v) => setUsername(v.target.value)}
-        placeholder="Username"
-        autoComplete="username"
-        disabled={loading}
-      />
-      <input
-        className="form-input"
-        type="password"
-        value={password}
-        onChange={(v) => setPassword(v.target.value)}
-        placeholder="Password"
-        autoComplete={isLogin ? "current-password" : "new-password"}
-        disabled={loading}
-      />
+
+      <div className="form-fields">
+        <label className="form-field">
+          <span className="form-label">Username</span>
+          <input
+            className="form-input"
+            type="text"
+            value={username}
+            onChange={(event) => setUsername(event.target.value)}
+            placeholder="Enter your username"
+            autoComplete="username"
+            disabled={loading}
+            required
+          />
+        </label>
+
+        <label className="form-field">
+          <span className="form-label">Password</span>
+          <input
+            className="form-input"
+            type="password"
+            value={password}
+            onChange={(event) => setPassword(event.target.value)}
+            placeholder="Enter your password"
+            autoComplete={isLogin ? "current-password" : "new-password"}
+            disabled={loading}
+            required
+          />
+        </label>
+      </div>
+
       <button className="form-button" type="submit" disabled={loading}>
-        {loading ? "Loading..." : buttonText}
+        {loading ? "Processing..." : buttonText}
       </button>
+
       {error && <p className="form-error">{error}</p>}
       {footer && <div className="form-footer">{footer}</div>}
     </form>
