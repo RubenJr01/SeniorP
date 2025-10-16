@@ -1,11 +1,23 @@
 import { NavLink, useLocation, useNavigate } from "react-router-dom";
-import { useMemo } from "react";
+import { useEffect, useMemo, useState } from "react";
 import "../styles/Navigation.css";
 import { ACCESS_TOKEN } from "../constants";
 
 function Navigation() {
   const location = useLocation();
   const navigate = useNavigate();
+  const [scrolled, setScrolled] = useState(false);
+
+  useEffect(() => {
+    const handleScroll = () => {
+      setScrolled(window.scrollY > 60);
+    };
+    handleScroll();
+    window.addEventListener("scroll", handleScroll, { passive: true });
+    return () => {
+      window.removeEventListener("scroll", handleScroll);
+    };
+  }, []);
 
   const isAuthenticated =
     typeof window !== "undefined" && Boolean(localStorage.getItem(ACCESS_TOKEN));
@@ -15,16 +27,16 @@ function Navigation() {
     if (location.pathname === "/") {
       classes.push("app-nav--transparent");
     }
+    if (scrolled) {
+      classes.push("app-nav--scrolled");
+    }
     return classes.join(" ");
-  }, [location.pathname]);
+  }, [location.pathname, scrolled]);
 
   return (
     <nav className={navClassName}>
       <div className="app-nav__inner">
-        <div
-          className="app-nav__brand"
-          role="banner"
-        >
+        <div className="app-nav__brand" role="banner">
           V-Cal
         </div>
 
@@ -48,6 +60,16 @@ function Navigation() {
           >
             Dashboard
           </NavLink>
+          {isAuthenticated && (
+            <NavLink
+              to="/calendar"
+              className={({ isActive }) =>
+                `app-nav__link ${isActive ? "app-nav__link--active" : ""}`
+              }
+            >
+              Calendar
+            </NavLink>
+          )}
           {!isAuthenticated && (
             <NavLink
               to="/register"

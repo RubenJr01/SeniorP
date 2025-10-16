@@ -5,11 +5,18 @@
   display: flex;
   justify-content: center;
   padding: 0 1.5rem;
+  transition: opacity 0.3s ease, transform 0.3s ease;
 }
 
 .app-nav--transparent .app-nav__inner {
   background: rgba(255, 255, 255, 0.78);
   border-color: rgba(255, 255, 255, 0.4);
+}
+
+.app-nav--scrolled {
+  opacity: 0;
+  pointer-events: none;
+  transform: translateY(-0.8rem);
 }
 
 .app-nav__inner {
