@@ -43,7 +43,8 @@ local_settings.py
 env/
 venv/
 ENV/
-backend/env/   # your committed venv path
+backend/env/   
+.python_modules/
 *.pem
 *.key
 *.p12
@@ -54,6 +55,7 @@ backend/env/   # your committed venv path
 # --- Node / Frontend (Vite/React) ---
 **/node_modules/
 **/dist/
+frontend/dist/
 **/build/
 **/.vite/
 npm-debug.log*
@@ -72,7 +74,13 @@ lerna-debug.log*
 *.sln
 *.sw?
 .DS_Store
+**/.DS_Store
 Thumbs.db
+*.log
+
+# Coverage / reports
+coverage/
+reports/
 
 # --- Misc ---
 *.bak
