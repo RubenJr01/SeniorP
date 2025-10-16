@@ -83,6 +83,7 @@ If you are not configuring Google Calendar yet, you may omit those keys—sync b
 ### 3.4 Apply Migrations
 
 ```bash
+python manage.py makemigrations
 python manage.py migrate
 ```
 
