@@ -4,6 +4,12 @@ import api from "../api";
 import Navigation from "../components/Navigation";
 import "../styles/Dashboard.css";
 
+const SYNC_STATUS_LABEL = {
+  success: "Success",
+  error: "Error",
+  skipped: "Skipped",
+};
+
 function formatRecurrenceLabel(frequency, interval) {
   if (!frequency || frequency === "none") {
     return "";
@@ -29,7 +35,12 @@ export default function Dashboard() {
   const [googleStatus, setGoogleStatus] = useState({ connected: false });
   const [googleLoading, setGoogleLoading] = useState(true);
   const [googleWorking, setGoogleWorking] = useState(false);
-  const [googleMessage, setGoogleMessage] = useState(null);
+  const [brightspaceStatus, setBrightspaceStatus] = useState({ connected: false });
+  const [brightspaceLoading, setBrightspaceLoading] = useState(true);
+  const [brightspaceWorking, setBrightspaceWorking] = useState(false);
+  const [syncWorking, setSyncWorking] = useState(false);
+  const [syncResults, setSyncResults] = useState([]);
+  const [toastMessage, setToastMessage] = useState(null);
 
   const fetchOccurrences = useCallback(async () => {
     try {
@@ -61,6 +72,21 @@ export default function Dashboard() {
     }
   }, []);
 
+  const loadBrightspaceStatus = useCallback(async () => {
+    try {
+      setBrightspaceLoading(true);
+      const { data } = await api.get("/api/brightspace/status/");
+      setBrightspaceStatus({
+        connected: data.connected,
+        last_imported_at: data.last_imported_at,
+      });
+    } catch {
+      setBrightspaceStatus({ connected: false });
+    } finally {
+      setBrightspaceLoading(false);
+    }
+  }, []);
+
   useEffect(() => {
     fetchOccurrences();
   }, [fetchOccurrences]);
@@ -68,6 +94,10 @@ export default function Dashboard() {
   useEffect(() => {
     loadGoogleStatus();
   }, [loadGoogleStatus]);
+
+  useEffect(() => {
+    loadBrightspaceStatus();
+  }, [loadBrightspaceStatus]);
 
   useEffect(() => {
     const params = new URLSearchParams(location.search);
@@ -91,7 +121,7 @@ export default function Dashboard() {
         pieces.push(`removed ${deduped} duplicate${deduped === 1 ? "" : "s"}`);
       }
       const suffix = pieces.length ? ` - ${pieces.join(", ")}` : "";
-      setGoogleMessage({
+      setToastMessage({
         type: "success",
         text: `Google Calendar connected${suffix}.`,
       });
@@ -99,7 +129,7 @@ export default function Dashboard() {
       fetchOccurrences();
     } else {
       const message = params.get("message") || "unknown_error";
-      setGoogleMessage({
+      setToastMessage({
         type: "error",
         text: `Google Calendar connection failed (${message}).`,
       });
@@ -109,67 +139,31 @@ export default function Dashboard() {
 
   const connectGoogle = useCallback(async () => {
     setGoogleWorking(true);
-    setGoogleMessage(null);
+    setToastMessage(null);
     try {
       const { data } = await api.post("/api/google/oauth/start/");
       window.location.href = data.auth_url;
     } catch {
       setGoogleWorking(false);
-      setGoogleMessage({
+      setToastMessage({
         type: "error",
         text: "Could not start Google authorization. Please try again.",
       });
     }
   }, []);
 
-  const syncGoogle = useCallback(async () => {
-    setGoogleWorking(true);
-    setGoogleMessage(null);
-    try {
-      const { data } = await api.post("/api/google/sync/");
-      const stats = data.stats || {};
-      const summaries = [
-        ["created", "created"],
-        ["updated", "updated"],
-        ["deleted", "deleted"],
-        ["pushed", "pushed"],
-        ["linked_existing", "linked existing"],
-        ["deduped", "removed duplicates"],
-        ["google_deleted", "deleted in Google"],
-      ];
-      const detailParts = summaries
-        .filter(([key]) => stats[key])
-        .map(([key, label]) => `${label} ${stats[key]}`);
-      const detailText =
-        detailParts.length > 0 ? detailParts.join(", ") : "no changes detected";
-      setGoogleMessage({
-        type: "success",
-        text: `Google Calendar synced (${detailText}).`,
-      });
-      await fetchOccurrences();
-      await loadGoogleStatus();
-    } catch {
-      setGoogleMessage({
-        type: "error",
-        text: "Google sync failed.",
-      });
-    } finally {
-      setGoogleWorking(false);
-    }
-  }, [fetchOccurrences, loadGoogleStatus]);
-
   const disconnectGoogle = useCallback(async () => {
     setGoogleWorking(true);
-    setGoogleMessage(null);
+    setToastMessage(null);
     try {
       await api.delete("/api/google/disconnect/");
-      setGoogleMessage({
+      setToastMessage({
         type: "success",
         text: "Google Calendar disconnected.",
       });
       await loadGoogleStatus();
     } catch {
-      setGoogleMessage({
+      setToastMessage({
         type: "error",
         text: "Failed to disconnect Google Calendar.",
       });
@@ -177,6 +171,158 @@ export default function Dashboard() {
       setGoogleWorking(false);
     }
   }, [loadGoogleStatus]);
+
+  const syncAll = useCallback(async () => {
+    if (!googleStatus.connected && !brightspaceStatus.connected) {
+      setToastMessage({
+        type: "error",
+        text: "Connect Google or Brightspace before syncing.",
+      });
+      return;
+    }
+
+    setSyncWorking(true);
+    setSyncResults([]);
+    setToastMessage(null);
+
+    const results = [];
+
+    try {
+      if (googleStatus.connected) {
+        try {
+          const { data } = await api.post("/api/google/sync/");
+          const stats = data.stats || {};
+          const summaries = [
+            ["created", "created"],
+            ["updated", "updated"],
+            ["deleted", "deleted"],
+            ["pushed", "pushed"],
+            ["linked_existing", "linked existing"],
+            ["deduped", "removed duplicates"],
+            ["google_deleted", "deleted in Google"],
+          ];
+          const detailParts = summaries
+            .filter(([key]) => stats[key])
+            .map(([key, label]) => `${label} ${stats[key]}`);
+          const detailText =
+            detailParts.length > 0 ? detailParts.join(", ") : "No changes detected.";
+          results.push({
+            label: "Google Calendar",
+            status: "success",
+            message: detailText,
+          });
+        } catch (error) {
+          const message =
+            error.response?.data?.detail || "Google sync failed.";
+          results.push({
+            label: "Google Calendar",
+            status: "error",
+            message,
+          });
+        }
+      } else {
+        results.push({
+          label: "Google Calendar",
+          status: "skipped",
+          message: "Not connected.",
+        });
+      }
+
+      if (brightspaceStatus.connected) {
+        try {
+          const { data } = await api.post("/api/calendar/brightspace/import/", {});
+          const created = data.created || 0;
+          const updated = data.updated || 0;
+          const skipped = data.skipped || 0;
+          const parts = [];
+          if (created) parts.push(`created ${created}`);
+          if (updated) parts.push(`updated ${updated}`);
+          if (skipped) parts.push(`skipped ${skipped}`);
+          const detailText = parts.length ? parts.join(", ") : "No changes detected.";
+          results.push({
+            label: "Brightspace",
+            status: "success",
+            message: detailText,
+          });
+        } catch (error) {
+          const message =
+            error.response?.data?.detail || "Brightspace sync failed.";
+          results.push({
+            label: "Brightspace",
+            status: "error",
+            message,
+          });
+        }
+      } else {
+        results.push({
+          label: "Brightspace",
+          status: "skipped",
+          message: "Not connected.",
+        });
+      }
+
+      setSyncResults(results);
+
+      await fetchOccurrences();
+      await loadGoogleStatus();
+      await loadBrightspaceStatus();
+    } finally {
+      setSyncWorking(false);
+    }
+  }, [
+    googleStatus.connected,
+    brightspaceStatus.connected,
+    fetchOccurrences,
+    loadGoogleStatus,
+    loadBrightspaceStatus,
+  ]);
+
+  const connectBrightspace = useCallback(async () => {
+    const rawUrl = window.prompt("Paste your Brightspace iCal URL:");
+    const icsUrl = rawUrl ? rawUrl.trim() : "";
+    if (!icsUrl) {
+      return;
+    }
+    setBrightspaceWorking(true);
+    setToastMessage(null);
+    try {
+      await api.post("/api/calendar/brightspace/import/", { ics_url: icsUrl.trim() });
+      setToastMessage({
+        type: "success",
+        text: "Brightspace calendar imported.",
+      });
+      await loadBrightspaceStatus();
+      await fetchOccurrences();
+    } catch (error) {
+      const message = error.response?.data?.detail || "Failed to import Brightspace calendar.";
+      setToastMessage({
+        type: "error",
+        text: message,
+      });
+    } finally {
+      setBrightspaceWorking(false);
+    }
+  }, [fetchOccurrences, loadBrightspaceStatus]);
+
+  const disconnectBrightspace = useCallback(async () => {
+    setBrightspaceWorking(true);
+    setToastMessage(null);
+    try {
+      await api.delete("/api/brightspace/disconnect/");
+      setToastMessage({
+        type: "success",
+        text: "Brightspace feed disconnected.",
+      });
+      await loadBrightspaceStatus();
+    } catch {
+      setToastMessage({
+        type: "error",
+        text: "Failed to disconnect Brightspace feed.",
+      });
+    } finally {
+      setBrightspaceWorking(false);
+    }
+  }, [loadBrightspaceStatus]);
 
   const onDelete = async (eventId, isRecurring) => {
     const message = isRecurring
@@ -191,9 +337,6 @@ export default function Dashboard() {
     }
   };
 
-  const googleScopes = Array.isArray(googleStatus.scopes)
-    ? googleStatus.scopes
-    : [];
   const sortedEvents = [...events].sort(
     (a, b) => new Date(a.start) - new Date(b.start),
   );
@@ -256,6 +399,28 @@ export default function Dashboard() {
     ? "positive"
     : "warn";
 
+  const brightspaceStatusLabel = brightspaceLoading
+    ? "Checking..."
+    : brightspaceStatus.connected
+    ? "Connected"
+    : "Not connected";
+  const brightspaceStatusTone = brightspaceLoading
+    ? "pending"
+    : brightspaceStatus.connected
+    ? "positive"
+    : "warn";
+
+  const syncTimestamps = [];
+  if (googleStatus.connected && googleStatus.last_synced_at) {
+    syncTimestamps.push(new Date(googleStatus.last_synced_at).getTime());
+  }
+  if (brightspaceStatus.connected && brightspaceStatus.last_imported_at) {
+    syncTimestamps.push(new Date(brightspaceStatus.last_imported_at).getTime());
+  }
+  const latestSyncTimestamp = syncTimestamps.length ? Math.max(...syncTimestamps) : null;
+  const lastSyncValue = latestSyncTimestamp ? new Date(latestSyncTimestamp).toLocaleString() : "-";
+  const anyIntegrationConnected = googleStatus.connected || brightspaceStatus.connected;
+
   return (
     <>
       <Navigation />
@@ -266,9 +431,9 @@ export default function Dashboard() {
           <div className="dashboard-hero-text">
             <h1>Coordinate sorties with precision.</h1>
             <p>Plan missions, sync calendars, and keep every crew member aligned.</p>
-            {googleMessage && (
-              <div className={`dashboard-toast dashboard-toast--${googleMessage.type}`}>
-                {googleMessage.text}
+            {toastMessage && (
+              <div className={`dashboard-toast dashboard-toast--${toastMessage.type}`}>
+                {toastMessage.text}
               </div>
             )}
           </div>
@@ -295,99 +460,134 @@ export default function Dashboard() {
             <span className={`dashboard-chip dashboard-chip--${googleStatusTone}`}>
               {googleStatusLabel}
             </span>
-            <p>
-              {googleStatus.connected
-                ? `Connected as ${googleStatus.email}`
-                : "Link Google Calendar to share updates instantly."}
-            </p>
-          </article>
-          <article className="dashboard-stat">
-            <span className="dashboard-stat-label">Last sync</span>
-            <span className="dashboard-stat-value">
-              {googleStatus.connected && googleStatus.last_synced_at
-                ? new Date(googleStatus.last_synced_at).toLocaleString()
-                : "—"}
-            </span>
-            <p>Keep missions aligned across every device.</p>
-          </article>
-        </section>
-
-        <div className="dashboard-body">
-          <div className="dashboard-column">
-            <section className="dashboard-panel dashboard-panel--accent">
-              <div className="dashboard-panel-heading">
-                <div>
-                  <h2>Google Calendar</h2>
-                  <p>Sync sorties with the calendars your crews already use.</p>
-                </div>
-                <span className={`dashboard-chip dashboard-chip--${googleStatusTone}`}>
-                  {googleStatusLabel}
-                </span>
-              </div>
-              {googleLoading ? (
-                <p className="dashboard-muted">Checking Google connection...</p>
-              ) : googleStatus.connected ? (
-                <>
-                  <div className="dashboard-panel-body">
-                    <p className="dashboard-paragraph">
+            {googleLoading ? (
+              <p className="dashboard-muted">Checking Google connection...</p>
+            ) : (
+              <>
+                <p className="dashboard-paragraph">
+                  {googleStatus.connected ? (
+                    <>
                       Connected as <strong>{googleStatus.email}</strong>
-                    </p>
-                    {googleStatus.last_synced_at && (
-                      <p className="dashboard-paragraph">
-                        Last sync:{" "}
-                        {new Date(googleStatus.last_synced_at).toLocaleString()}
-                      </p>
-                    )}
-                  </div>
-                  {googleScopes.length > 0 && (
-                    <div className="dashboard-chip-row">
-                      {googleScopes.map((scope) => (
-                        <span
-                          key={scope}
-                          className="dashboard-chip dashboard-chip--outline"
-                        >
-                          {scope}
-                        </span>
-                      ))}
-                    </div>
+                    </>
+                  ) : (
+                    "Connect your Google Calendar to broadcast updates automatically."
                   )}
+                </p>
+                {googleStatus.connected ? (
                   <div className="dashboard-button-row">
-                    <button
-                      type="button"
-                      className="dashboard-button"
-                      onClick={syncGoogle}
-                      disabled={googleWorking}
-                    >
-                      {googleWorking ? "Working..." : "Sync now"}
-                    </button>
                     <button
                       type="button"
                       className="dashboard-button dashboard-button--ghost"
                       onClick={disconnectGoogle}
-                      disabled={googleWorking}
+                      disabled={googleWorking || syncWorking}
                     >
                       Disconnect
                     </button>
                   </div>
-                </>
-              ) : (
-                <>
-                  <p className="dashboard-muted">
-                    Connect your Google Calendar to broadcast updates automatically.
-                  </p>
+                ) : (
                   <button
                     type="button"
                     className="dashboard-button"
                     onClick={connectGoogle}
-                    disabled={googleWorking}
+                    disabled={googleWorking || syncWorking}
                   >
                     {googleWorking ? "Working..." : "Connect Google Calendar"}
                   </button>
-                </>
-              )}
-            </section>
-          </div>
+                )}
+              </>
+            )}
+          </article>
+          <article className="dashboard-stat">
+            <span className="dashboard-stat-label">Brightspace import</span>
+            <span className={`dashboard-chip dashboard-chip--${brightspaceStatusTone}`}>
+              {brightspaceStatusLabel}
+            </span>
+            {brightspaceLoading ? (
+              <p className="dashboard-muted">Checking Brightspace feed...</p>
+            ) : (
+              <>
+                <p className="dashboard-paragraph">
+                  {brightspaceStatus.connected
+                    ? "Feed saved for rapid class imports."
+                    : "Connect your Brightspace iCal feed to mirror class schedules."}
+                </p>
+                {brightspaceStatus.connected ? (
+                  <div className="dashboard-button-row">
+                    <button
+                      type="button"
+                      className="dashboard-button dashboard-button--ghost"
+                      onClick={disconnectBrightspace}
+                      disabled={brightspaceWorking || syncWorking}
+                    >
+                      Disconnect
+                    </button>
+                  </div>
+                ) : (
+                  <button
+                    type="button"
+                    className="dashboard-button"
+                    onClick={connectBrightspace}
+                    disabled={brightspaceWorking || syncWorking}
+                  >
+                    {brightspaceWorking ? "Working..." : "Add Brightspace Feed"}
+                  </button>
+                )}
+              </>
+            )}
+          </article>
+          <article className="dashboard-stat">
+            <span className="dashboard-stat-label">Last sync</span>
+            <span className="dashboard-stat-value">{lastSyncValue}</span>
+            {googleLoading || brightspaceLoading ? (
+              <p className="dashboard-muted">Verifying sync status...</p>
+            ) : anyIntegrationConnected ? (
+              <p className="dashboard-paragraph">
+                {latestSyncTimestamp
+                  ? "Latest activity across Google and Brightspace."
+                  : "No sync activity recorded yet."}
+              </p>
+            ) : (
+              <p className="dashboard-paragraph">
+                Connect Google or Brightspace to enable one-click sync.
+              </p>
+            )}
+            <div className="dashboard-button-row dashboard-button-row--start">
+              <button
+                type="button"
+                className="dashboard-button"
+                onClick={syncAll}
+                disabled={syncWorking || !anyIntegrationConnected}
+              >
+                {syncWorking ? "Syncing..." : "Sync all"}
+              </button>
+            </div>
+            {syncResults.length > 0 && (
+              <ul className="dashboard-sync-results">
+                {syncResults.map((result) => {
+                  const statusLabel = SYNC_STATUS_LABEL[result.status] || "";
+                  return (
+                    <li
+                      key={result.label}
+                      className={`dashboard-sync-result dashboard-sync-result--${result.status}`}
+                    >
+                      <span className="dashboard-sync-result-label">{result.label}</span>
+                      <span className="dashboard-sync-result-message">
+                        {statusLabel && (
+                          <span className="dashboard-sync-result-status">
+                            {statusLabel}
+                          </span>
+                        )}
+                        <span>{result.message}</span>
+                      </span>
+                    </li>
+                  );
+                })}
+              </ul>
+            )}
+          </article>
+        </section>
 
+        <div className="dashboard-body">
           <section className="dashboard-panel dashboard-panel--list">
             <div className="dashboard-panel-heading">
               <div>

@@ -15,11 +15,11 @@ load_dotenv(BASE_DIR / "backend" / ".env")
 SECRET_KEY = os.getenv("DJANGO_SECRET_KEY", "dev-secret-key")
 DEBUG = os.getenv("DJANGO_DEBUG", "True").lower() == "true"
 
-# !!! EDIT THESE TWO with your real subdomains !!!
-FRONTEND_TUNNEL = "compression-olympus-discovery-layout.trycloudflare.com"
-BACKEND_TUNNEL = "filled-pmid-laboratory-throat.trycloudflare.com"
-
-ALLOWED_HOSTS = [host for host in (BACKEND_TUNNEL, "localhost", "127.0.0.1") if host]
+ALLOWED_HOSTS = [
+    host.strip()
+    for host in os.getenv("DJANGO_ALLOWED_HOSTS", "localhost,127.0.0.1").split(",")
+    if host.strip()
+]
 
 # --- Apps ---
 INSTALLED_APPS = [
@@ -118,22 +118,28 @@ GOOGLE_SCOPES = [
 ]
 GOOGLE_OAUTH_PROMPT = os.getenv("GOOGLE_OAUTH_PROMPT", "consent")
 
-# --- CORS / CSRF for tunnels ---
+# --- CORS / CSRF ---
 CORS_ALLOW_ALL_ORIGINS = False
-CORS_ALLOWED_ORIGINS = [
-    origin
-    for origin in (
-        FRONTEND_APP_URL,
-        f"https://{FRONTEND_TUNNEL}" if FRONTEND_TUNNEL else "",
-    )
-    if origin
-]
+
+_cors_origins = os.getenv("DJANGO_CORS_ALLOWED_ORIGINS", "").strip()
+if _cors_origins:
+    CORS_ALLOWED_ORIGINS = [
+        origin.strip()
+        for origin in _cors_origins.split(",")
+        if origin.strip()
+    ]
+elif FRONTEND_APP_URL:
+    CORS_ALLOWED_ORIGINS = [FRONTEND_APP_URL]
+else:
+    CORS_ALLOWED_ORIGINS = []
+
 CORS_ALLOW_CREDENTIALS = False  # set True only if you use cookies for auth
 CORS_ALLOW_HEADERS = ["Authorization", "Content-Type"]
 CORS_ALLOW_METHODS = ["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"]
 
-
+_csrf_origins = os.getenv("DJANGO_CSRF_TRUSTED_ORIGINS", "").strip()
 CSRF_TRUSTED_ORIGINS = [
-    f"https://{FRONTEND_TUNNEL}",
-    f"https://{BACKEND_TUNNEL}",
+    origin.strip()
+    for origin in _csrf_origins.split(",")
+    if origin.strip()
 ]

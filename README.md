@@ -1,231 +1,79 @@
-# V-Cal (SeniorP) – Local Development Manual
+# V-Cal Local Setup Guide
 
-This repository contains a Django REST backend and a Vite/React frontend that power **V-Cal**, a calendar and sortie-planning app with optional Google Calendar synchronisation.  
-Use this guide as an end-to-end checklist for setting the project up on a fresh machine.
+V-Cal is a Django REST API (`backend/`) paired with a Vite + React frontend (`frontend/`). Follow the steps below to run both services on your machine.
 
----
+## 1. Prerequisites
+- Python 3.11 (check with `python --version`)
+- Node.js 18.x (check with `node --version`)
+- npm (bundled with Node.js)
+- Git
 
-## 1. System Requirements
-
-| Component          | Minimum version | How to verify                                       |
-|-------------------|-----------------|-----------------------------------------------------|
-| Python             | 3.11            | `python --version` or `python3 --version`          |
-| Node.js            | 18.x            | `node --version`                                    |
-| npm                | bundled with Node | `npm --version`                                   |
-| Git                | any modern version | `git --version`                                 |
-| Google Cloud acct*| n/a             | only needed for Google Calendar integration        |
-
-\*You can run the app without Google Calendar credentials; synchronisation features will simply be disabled.
-
-> **Windows tip:** Use PowerShell for the listed commands. On macOS/Linux substitute `python3` for `python` and `source env/bin/activate` for the activation step shown below.
-
----
+Windows users should run commands in PowerShell. Replace `python` with `python3` and `.\env\Scripts\Activate.ps1` with `source env/bin/activate` on macOS/Linux.
 
 ## 2. Clone the Repository
-
 ```bash
 git clone https://github.com/<your-org>/SeniorP.git
 cd SeniorP
 ```
 
-If you have multiple remotes or forks, verify you are pointing at the desired repository with `git remote -v`.
-
----
-
-## 3. Backend Setup (`backend/`)
-
-### 3.1 Create and Activate a Virtual Environment
-
-```bash
-cd backend
-python -m venv env
-
-# Activate it
-# PowerShell (Windows)
-.\env\Scripts\Activate.ps1
-# Bash/Zsh (macOS/Linux)
-source env/bin/activate
-```
-
-You should now see `(env)` at the start of your shell prompt.
-
-### 3.2 Install Python Dependencies
-
-The consolidated dependency list lives in `requirements.txt` at the project root.
-
-```bash
-python -m pip install --upgrade pip
-pip install -r ../requirements.txt
-```
-
-> If you encounter installation issues, ensure the virtual environment is active and that you are running Python 3.11 or newer.
-
-### 3.3 Configure Environment Variables
-
-Create `backend/.env` (this file is ignored by Git):
-
+## 3. Configure Environment Files
+Create `backend/.env`:
 ```ini
-DJANGO_SECRET_KEY=replace-me-with-a-random-string
+DJANGO_SECRET_KEY=replace-with-strong-value
 DJANGO_DEBUG=True
 DJANGO_ALLOWED_HOSTS=localhost,127.0.0.1
 DJANGO_CORS_ALLOWED_ORIGINS=http://localhost:5173
 FRONTEND_APP_URL=http://localhost:5173
-
-# Optional: enable Google Calendar sync
 GOOGLE_CLIENT_ID=your-google-client-id.apps.googleusercontent.com
 GOOGLE_CLIENT_SECRET=your-google-client-secret
 GOOGLE_REDIRECT_URI=http://localhost:8000/api/google/oauth/callback/
 GOOGLE_OAUTH_PROMPT=consent
 ```
 
-If you are not configuring Google Calendar yet, you may omit those keys—sync buttons will simply be disabled.
-
-### 3.4 Apply Migrations
-
-```bash
-python manage.py migrate
-```
-
-### 3.5 Run the Backend API
-
-```bash
-python manage.py runserver
-```
-
-The API is now available at <http://localhost:8000>. Leave this process running while you work with the frontend.
-
----
-
-## 4. Frontend Setup (`frontend/`)
-
-Open a **new terminal** (keep the backend running) and from the repository root:
-
-```bash
-cd frontend
-npm install
-```
-
 Create `frontend/.env`:
-
 ```ini
 VITE_API_URL=http://localhost:8000
 ```
 
-Start the development server:
+> Skip the Google values if you do not plan to test calendar sync yet.
 
+## 4. Backend Setup
 ```bash
+cd backend
+python -m venv env
+.\env\Scripts\Activate.ps1
+python -m pip install --upgrade pip
+pip install -r ../requirements.txt
+python manage.py migrate
+python manage.py runserver
+```
+The API listens at `http://localhost:8000/`. Leave this process running.
+
+## 5. Frontend Setup
+Open a new terminal at the project root:
+```bash
+cd frontend
+npm install
 npm run dev
 ```
+The UI is available at `http://localhost:5173/`.
 
-By default Vite serves the app at <http://localhost:5173>. The dev server provides hot module reloading; leave this process running while developing.
+## 6. Log In and Explore
+1. Register a new account from the landing page.
+2. Sign in to access the dashboard and calendar.
+3. Create missions from the calendar view; changes appear immediately on the dashboard.
 
----
+## 7. Optional: Google Calendar Sync
+1. In Google Cloud Console, create an OAuth 2.0 Web client and add `http://localhost:8000/api/google/oauth/callback/` as an authorised redirect URI.
+2. Add the generated client ID and secret to `backend/.env`.
+3. Restart `python manage.py runserver`.
+4. From the dashboard, connect your Google account and use **Sync all** to push updates.
 
-## 5. Optional – Google Calendar Integration
+## 8. Useful Commands
+| Goal | Command |
+|------|---------|
+| Run Django tests | `python manage.py test` |
+| Lint React code  | `npm run lint` |
+| Build frontend   | `npm run build` |
 
-To use Google synchronisation features:
-
-1. Sign in to the [Google Cloud Console](https://console.cloud.google.com/).
-2. Enable the **Google Calendar API** for your project.
-3. Configure the OAuth consent screen (add yourself as a test user if the app is not yet verified).
-4. Create OAuth credentials of type **Web application** with:
-   - Authorized JavaScript origins: `http://localhost:5173`
-   - Authorized redirect URIs: `http://localhost:8000/api/google/oauth/callback/`
-5. Paste the generated `client_id` and `client_secret` into `backend/.env`.
-6. Restart the backend server so the new environment variables are loaded.
-7. In the web app, log in and click **Connect Google Calendar**; complete the OAuth flow, then use **Sync now** to pull events.
-
----
-
-## 6. Optional – Brightspace (UTRGV) Calendar Import
-
-You can pull course events from UTRGV's Brightspace (D2L) calendar using the built-in iCal feed.
-
-1. Log in to Brightspace and open the **Calendar** tool.
-2. Select the course(s) you want included, then click **Settings** → **Subscribe** (or **Subscribe to Calendar** in the classic interface).
-3. Brightspace shows an **iCal subscription URL**. Copy the URL to your clipboard.
-4. In V-Cal, open the **Calendar** page and click **Import Brightspace**.
-5. Paste the iCal URL, submit the form, and wait a few seconds. Events are imported into your account with the source label **Brightspace**; existing events with the same UID are updated. The URL is stored securely per user so future imports only require clicking **Import Brightspace** (leave the field empty to refresh with the saved feed).
-
-You can also trigger the import via the API:
-
-```bash
-# First-time import (saves the URL)
-curl -X POST http://localhost:8000/api/calendar/brightspace/import/ \
-  -H "Authorization: Bearer <your-access-token>" \
-  -H "Content-Type: application/json" \
-  -d '{"ics_url": "https://byui.brightspace.com/d2l/le/calendar/export/ical/..."}'
-
-# Subsequent refresh using the stored URL
-curl -X POST http://localhost:8000/api/calendar/brightspace/import/ \
-  -H "Authorization: Bearer <your-access-token>" \
-  -H "Content-Type: application/json" \
-  -d '{}'
-```
-
-> The backend stores both the iCal URL and individual event UIDs, so re-importing keeps events in sync instead of duplicating them.
-
----
-
-## 7. Running Both Services Together
-
-| Terminal | Command                                       | URL                                   |
-|----------|-----------------------------------------------|----------------------------------------|
-| Backend  | `python manage.py runserver`                  | <http://localhost:8000>                |
-| Frontend | `npm run dev`                                 | <http://localhost:5173>                |
-
-Open <http://localhost:5173> in a browser, register or log in, and start creating missions. Recurring events, mission logs, and sync status will update live as you interact with the UI.
-
----
-
-## 8. Useful Development Commands
-
-| Purpose                          | Command                                             |
-|----------------------------------|------------------------------------------------------|
-| Run Django tests                 | `python manage.py test`                             |
-| Run ESLint (frontend lint)       | `npm run lint`                                      |
-| Create a production build        | `npm run build`                                     |
-| Collect static files (if needed) | `python manage.py collectstatic`                    |
-| Reset local database             | delete `backend/db.sqlite3`, then rerun migrations  |
-
----
-
-## 9. Troubleshooting
-
-- **Backend fails to start**: Ensure the virtual environment is active and dependencies are installed; check for missing `.env` keys.
-- **Frontend cannot reach API**: Confirm `VITE_API_URL` is correct and the backend is running on port 8000.
-- **CORS errors**: Verify `DJANGO_CORS_ALLOWED_ORIGINS` and `FRONTEND_APP_URL` in `backend/.env` match the frontend origin exactly.
-- **Google OAuth errors**: Double-check the redirect URI and authorised origins in the Google Cloud Console; restart the backend after editing `.env`.
-- **Recurring events not appearing**: Make sure you ran `python manage.py migrate` after pulling the latest code so the recurrence fields are created in the database.
-- **Brightspace import fails**: Confirm the iCal URL loads in a browser (it should download an `.ics` file) and that you are logged in to V-Cal before importing.
-
----
-
-## 10. Cleaning Up
-
-To stop the dev servers, press `Ctrl+C` in each terminal.  
-Deactivate the Python virtual environment when finished:
-
-```bash
-deactivate  # Windows/macOS/Linux
-```
-
-To remove all installed Node modules and Python dependencies:
-
-```bash
-rm -rf frontend/node_modules frontend/dist
-Remove-Item -Recurse -Force frontend/node_modules frontend/dist  # PowerShell equivalent
-
-cd backend
-Remove-Item -Recurse -Force env  # or rm -rf env on macOS/Linux
-```
-
----
-
-## 11. Next Steps
-
-- Commit your work (`git add ... && git commit`) and push to your chosen branch.
-- Deploy the backend and frontend or containerise for production.
-- Configure CI to run the Django and React test suites automatically.
-
-You now have a fully operational local environment for V-Cal. Happy building!
+You now have a fully working local environment for V-Cal. Happy building!

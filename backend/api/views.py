@@ -349,6 +349,36 @@ class BrightspaceImportView(APIView):
         )
 
 
+class BrightspaceStatusView(APIView):
+    permission_classes = [IsAuthenticated]
+
+    def get(self, request):
+        try:
+            feed = request.user.brightspace_feed
+        except BrightspaceFeed.DoesNotExist:
+            return Response({"connected": False})
+
+        return Response(
+            {
+                "connected": True,
+                "last_imported_at": feed.last_imported_at,
+            }
+        )
+
+
+class BrightspaceDisconnectView(APIView):
+    permission_classes = [IsAuthenticated]
+
+    def delete(self, request):
+        try:
+            feed = request.user.brightspace_feed
+        except BrightspaceFeed.DoesNotExist:
+            return Response(status=status.HTTP_204_NO_CONTENT)
+
+        feed.delete()
+        return Response(status=status.HTTP_204_NO_CONTENT)
+
+
 class GoogleStatusView(APIView):
     permission_classes = [IsAuthenticated]
 
@@ -421,7 +451,7 @@ class GoogleOAuthCallbackView(APIView):
 
     def get(self, request):
         frontend_base = settings.FRONTEND_APP_URL.rstrip("/") or "http://localhost:5173"
-        redirect_base = f"{frontend_base}"
+        redirect_base = f"{frontend_base}/dashboard"
 
         error = request.query_params.get("error")
         if error:

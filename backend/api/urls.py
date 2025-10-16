@@ -4,6 +4,8 @@ from .views import (
     EventViewSet,
     EventOccurrencesView,
     BrightspaceImportView,
+    BrightspaceStatusView,
+    BrightspaceDisconnectView,
     GoogleDisconnectView,
     GoogleOAuthCallbackView,
     GoogleOAuthStartView,
@@ -17,6 +19,8 @@ router.register(r"events", EventViewSet, basename="event")
 urlpatterns = [
     path("events/occurrences/", EventOccurrencesView.as_view(), name="event-occurrences"),
     path("calendar/brightspace/import/", BrightspaceImportView.as_view(), name="calendar-brightspace-import"),
+    path("brightspace/status/", BrightspaceStatusView.as_view(), name="brightspace-status"),
+    path("brightspace/disconnect/", BrightspaceDisconnectView.as_view(), name="brightspace-disconnect"),
     path("", include(router.urls)),
     path("google/status/", GoogleStatusView.as_view(), name="google-status"),
     path("google/oauth/start/", GoogleOAuthStartView.as_view(), name="google-oauth-start"),
