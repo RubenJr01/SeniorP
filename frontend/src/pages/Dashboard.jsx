@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useState } from "react";
 import { useLocation } from "react-router-dom";
 import api from "../api";
+import "../styles/Dashboard.css";
 
 function isoLocal(date) {
   const pad = (n) => String(n).padStart(2, "0");
@@ -74,6 +75,7 @@ export default function Dashboard() {
       setGoogleLoading(false);
     }
   }, []);
+
   useEffect(() => {
     fetchEvents();
   }, [fetchEvents]);
@@ -88,6 +90,7 @@ export default function Dashboard() {
     if (!status) {
       return;
     }
+
     if (status === "success") {
       const imported = Number(params.get("imported") || 0);
       const linked = Number(params.get("linked") || 0);
@@ -102,7 +105,7 @@ export default function Dashboard() {
       if (deduped > 0) {
         pieces.push(`removed ${deduped} duplicate${deduped === 1 ? "" : "s"}`);
       }
-      const suffix = pieces.length ? ` — ${pieces.join(", ")}` : "";
+      const suffix = pieces.length ? ` - ${pieces.join(", ")}` : "";
       setGoogleMessage({
         type: "success",
         text: `Google Calendar connected${suffix}.`,
@@ -153,9 +156,7 @@ export default function Dashboard() {
         .filter(([key]) => stats[key])
         .map(([key, label]) => `${label} ${stats[key]}`);
       const detailText =
-        detailParts.length > 0
-          ? detailParts.join(", ")
-          : "no changes detected";
+        detailParts.length > 0 ? detailParts.join(", ") : "no changes detected";
       setGoogleMessage({
         type: "success",
         text: `Google Calendar synced (${detailText}).`,
@@ -191,6 +192,7 @@ export default function Dashboard() {
       setGoogleWorking(false);
     }
   }, [loadGoogleStatus]);
+
   const onChange = (e) => {
     const { name, value, type, checked } = e.target;
     setForm((f) => {
@@ -209,9 +211,17 @@ export default function Dashboard() {
           return { ...f, startDate: value };
         }
         const startDateTime = new Date(f.startDateTime);
-        startDateTime.setFullYear(base.getFullYear(), base.getMonth(), base.getDate());
+        startDateTime.setFullYear(
+          base.getFullYear(),
+          base.getMonth(),
+          base.getDate(),
+        );
         const endDateTime = new Date(f.endDateTime);
-        endDateTime.setFullYear(base.getFullYear(), base.getMonth(), base.getDate());
+        endDateTime.setFullYear(
+          base.getFullYear(),
+          base.getMonth(),
+          base.getDate(),
+        );
         return {
           ...f,
           startDate: value,
@@ -232,7 +242,7 @@ export default function Dashboard() {
         return {
           ...f,
           startDateTime: value,
-           endDateTime: nextEnd,
+          endDateTime: nextEnd,
           startDate: value ? isoDate(value) : f.startDate,
         };
       }
@@ -302,226 +312,261 @@ export default function Dashboard() {
   };
 
   const onDelete = async (id) => {
-    if (!confirm("Delete this event?")) return;
+    if (!window.confirm("Delete this event?")) return;
     try {
       await api.delete(`/api/events/${id}/`);
       setEvents((evs) => evs.filter((e) => e.id !== id));
     } catch {
-      alert("Delete failed.");
+      window.alert("Delete failed.");
     }
   };
 
-  return (
-    <div style={{ maxWidth: 800, margin: "2rem auto", padding: "0 1rem" }}>
-      <header
-        style={{
-          display: "flex",
-          justifyContent: "space-between",
-          alignItems: "baseline",
-        }}
-      >
-        <h1 style={{ margin: 0 }}>Dashboard</h1>
-        <a href="/logout" style={{ fontSize: 14 }}>
-          Logout
-        </a>
-      </header>
+  const googleScopes = Array.isArray(googleStatus.scopes)
+    ? googleStatus.scopes
+    : [];
+  const hasEvents = events.length > 0;
+  const eventCountLabel = hasEvents
+    ? `${events.length} ${events.length === 1 ? "event" : "events"}`
+    : "";
 
-      <section style={{ marginTop: "1.5rem" }}>
-        <h2 style={{ marginBottom: "0.75rem" }}>Google Calendar</h2>
+  return (
+    <main className="dashboard">
+      <div className="dashboard-shell">
+        <header className="dashboard-header">
+          <div className="dashboard-heading">
+            <h1>Mission Control</h1>
+            <p>Plan sorties, sync calendars, and keep everyone aligned.</p>
+          </div>
+          <a className="dashboard-logout" href="/logout">
+            Logout
+          </a>
+        </header>
+
         {googleMessage && (
-          <div
-            style={{
-              padding: "0.75rem 1rem",
-              borderRadius: 6,
-              backgroundColor: googleMessage.type === "success" ? "#ecfdf5" : "#fcebea",
-              color: googleMessage.type === "success" ? "#047857" : "#b91c1c",
-              marginBottom: "0.75rem",
-            }}
-          >
+          <div className={`dashboard-banner dashboard-banner--${googleMessage.type}`}>
             {googleMessage.text}
           </div>
         )}
-        {googleLoading ? (
-          <p>Checking Google connection…</p>
-        ) : googleStatus.connected ? (
-          <div style={{ display: "flex", flexDirection: "column", gap: "0.5rem" }}>
-            <p style={{ margin: 0 }}>
-              Connected as <strong>{googleStatus.email}</strong>
-              {googleStatus.last_synced_at && (
-                <span style={{ display: "block", fontSize: 13, opacity: 0.8 }}>
-                  Last sync: {new Date(googleStatus.last_synced_at).toLocaleString()}
-                </span>
-              )}
-            </p>
-            <div style={{ display: "flex", gap: "0.5rem", flexWrap: "wrap" }}>
-              <button onClick={syncGoogle} disabled={googleWorking}>
-                {googleWorking ? "Working..." : "Sync now"}
-              </button>
-              <button onClick={disconnectGoogle} disabled={googleWorking}>
-                Disconnect
-              </button>
-            </div>
-          </div>
-        ) : (
-          <div style={{ display: "flex", flexDirection: "column", gap: "0.5rem" }}>
-            <p style={{ margin: 0 }}>Not connected to Google Calendar.</p>
-            <button onClick={connectGoogle} disabled={googleWorking}>
-              {googleWorking ? "Working..." : "Connect Google Calendar"}
-            </button>
-          </div>
-        )}
-      </section>
 
-      <section style={{ marginTop: "1.5rem" }}>
-        <h2 style={{ marginBottom: "0.75rem" }}>Create Event</h2>
-        <form onSubmit={onSubmit} style={{ display: "grid", gap: "0.75rem" }}>
-          <input
-            name="title"
-            value={form.title}
-            onChange={onChange}
-            placeholder="Title"
-            required
-          />
-          <textarea
-            name="description"
-            value={form.description}
-            onChange={onChange}
-            placeholder="Description (optional)"
-            rows={3}
-          />
-          <label>
-            Start:&nbsp;
-            {!form.all_day ? (
-              <input
-                type="datetime-local"
-                name="startDateTime"
-                value={form.startDateTime}
-                onChange={onChange}
-                required
-              />
-            ) : (
-              <input
-                type="date"
-                name="startDate"
-                value={form.startDate}
-                onChange={onChange}
-                required
-              />
-            )}
-          </label>
-          {!form.all_day && (
-            <label>
-              End:&nbsp;
-              <input
-                type="datetime-local"
-                name="endDateTime"
-                value={form.endDateTime}
-                onChange={onChange}
-                required
-              />
-            </label>
-          )}
-          {form.all_day && (
-            <small style={{ color: "#4b5563" }}>
-              End of day is applied automatically for all-day events.
-            </small>
-          )}
-          <label
-            style={{ display: "inline-flex", alignItems: "center", gap: 8 }}
-          >
-            <input
-              type="checkbox"
-              name="all_day"
-              checked={form.all_day}
-              onChange={onChange}
-            />
-            All day
-          </label>
-          <button type="submit" disabled={submitting}>
-            {submitting ? "Saving..." : "Add Event"}
-          </button>
-          {error && <p style={{ color: "crimson" }}>{error}</p>}
-        </form>
-      </section>
-
-      <section style={{ marginTop: "2rem" }}>
-        <h2 style={{ marginBottom: "0.5rem" }}>My Events</h2>
-        {loading ? (
-          <p>Loading...</p>
-        ) : events.length === 0 ? (
-          <p>No events yet.</p>
-        ) : (
-          <ul
-            style={{
-              listStyle: "none",
-              padding: 0,
-              margin: 0,
-              display: "grid",
-              gap: "0.75rem",
-            }}
-          >
-            {events.map((ev) => (
-              <li
-                key={ev.id}
-                style={{
-                  border: "1px solid #ddd",
-                  borderRadius: 8,
-                  padding: "0.75rem",
-                }}
+        <div className="dashboard-grid">
+          <section className="dashboard-card">
+            <div className="dashboard-card-header">
+              <h2>Google Calendar</h2>
+              <span
+                className={`dashboard-status ${
+                  googleLoading
+                    ? "dashboard-status--pending"
+                    : googleStatus.connected
+                    ? "dashboard-status--ok"
+                    : "dashboard-status--warn"
+                }`}
               >
-                <div
-                  style={{
-                    display: "flex",
-                    justifyContent: "space-between",
-                    gap: 12,
-                    flexWrap: "wrap",
-                  }}
+                {googleLoading
+                  ? "Checking..."
+                  : googleStatus.connected
+                  ? "Connected"
+                  : "Not connected"}
+              </span>
+            </div>
+            {googleLoading ? (
+              <p className="dashboard-muted">Checking Google connection...</p>
+            ) : googleStatus.connected ? (
+              <>
+                <p className="dashboard-body">
+                  Connected as <strong>{googleStatus.email}</strong>
+                  {googleStatus.last_synced_at && (
+                    <span className="dashboard-subtext">
+                      Last sync:{" "}
+                      {new Date(googleStatus.last_synced_at).toLocaleString()}
+                    </span>
+                  )}
+                </p>
+                {googleScopes.length > 0 && (
+                  <div className="dashboard-chip-row">
+                    {googleScopes.map((scope) => (
+                      <span key={scope} className="dashboard-chip">
+                        {scope}
+                      </span>
+                    ))}
+                  </div>
+                )}
+                <div className="dashboard-actions">
+                  <button
+                    type="button"
+                    className="dashboard-button"
+                    onClick={syncGoogle}
+                    disabled={googleWorking}
+                  >
+                    {googleWorking ? "Working..." : "Sync now"}
+                  </button>
+                  <button
+                    type="button"
+                    className="dashboard-button dashboard-button--secondary"
+                    onClick={disconnectGoogle}
+                    disabled={googleWorking}
+                  >
+                    Disconnect
+                  </button>
+                </div>
+              </>
+            ) : (
+              <>
+                <p className="dashboard-muted">
+                  Connect your Google Calendar to keep missions aligned across
+                  devices.
+                </p>
+                <button
+                  type="button"
+                  className="dashboard-button"
+                  onClick={connectGoogle}
+                  disabled={googleWorking}
                 >
-                  <div>
-                    <strong>{ev.title}</strong>
-                    {ev.source !== "local" && (
-                      <span
-                        style={{
-                          marginLeft: 8,
-                          fontSize: 12,
-                          backgroundColor: "#eef2ff",
-                          color: "#3730a3",
-                          padding: "2px 6px",
-                          borderRadius: 4,
-                        }}
-                      >
-                        {ev.source === "google" ? "Google" : "Synced"}
-                      </span>
-                    )}
-                    {ev.all_day && (
-                      <span
-                        style={{ marginLeft: 8, fontSize: 12, opacity: 0.75 }}
-                      >
-                        (All day)
-                      </span>
-                    )}
+                  {googleWorking ? "Working..." : "Connect Google Calendar"}
+                </button>
+              </>
+            )}
+          </section>
+
+          <section className="dashboard-card">
+            <div className="dashboard-card-header">
+              <h2>Create Event</h2>
+            </div>
+            <form className="dashboard-form" onSubmit={onSubmit}>
+              <input
+                className="dashboard-input"
+                name="title"
+                value={form.title}
+                onChange={onChange}
+                placeholder="Title"
+                required
+              />
+              <textarea
+                className="dashboard-textarea"
+                name="description"
+                value={form.description}
+                onChange={onChange}
+                placeholder="Description (optional)"
+                rows={3}
+              />
+              <label className="dashboard-label">
+                <span>Start</span>
+                {!form.all_day ? (
+                  <input
+                    className="dashboard-input"
+                    type="datetime-local"
+                    name="startDateTime"
+                    value={form.startDateTime}
+                    onChange={onChange}
+                    required
+                  />
+                ) : (
+                  <input
+                    className="dashboard-input"
+                    type="date"
+                    name="startDate"
+                    value={form.startDate}
+                    onChange={onChange}
+                    required
+                  />
+                )}
+              </label>
+              {!form.all_day && (
+                <label className="dashboard-label">
+                  <span>End</span>
+                  <input
+                    className="dashboard-input"
+                    type="datetime-local"
+                    name="endDateTime"
+                    value={form.endDateTime}
+                    onChange={onChange}
+                    required
+                  />
+                </label>
+              )}
+              {form.all_day && (
+                <p className="dashboard-note">
+                  End of day is applied automatically for all-day events.
+                </p>
+              )}
+              <label className="dashboard-check">
+                <input
+                  type="checkbox"
+                  name="all_day"
+                  checked={form.all_day}
+                  onChange={onChange}
+                />
+                <span>All day</span>
+              </label>
+              <button
+                className="dashboard-button"
+                type="submit"
+                disabled={submitting}
+              >
+                {submitting ? "Saving..." : "Add Event"}
+              </button>
+              {error && <p className="dashboard-error">{error}</p>}
+            </form>
+          </section>
+        </div>
+
+        <section className="dashboard-card">
+          <div className="dashboard-card-header">
+            <h2>My Events</h2>
+            {!loading && hasEvents && (
+              <span className="dashboard-muted">{eventCountLabel}</span>
+            )}
+          </div>
+          {loading ? (
+            <p className="dashboard-muted">Loading...</p>
+          ) : !hasEvents ? (
+            <p className="dashboard-empty">
+              No events yet. Create your first mission above.
+            </p>
+          ) : (
+            <ul className="dashboard-event-list">
+              {events.map((ev) => (
+                <li className="dashboard-event" key={ev.id}>
+                  <div className="dashboard-event-main">
+                    <div className="dashboard-event-header">
+                      <strong>{ev.title}</strong>
+                      {ev.source !== "local" && (
+                        <span
+                          className={`dashboard-tag ${
+                            ev.source === "google"
+                              ? "dashboard-tag--google"
+                              : "dashboard-tag--sync"
+                          }`}
+                        >
+                          {ev.source === "google" ? "Google" : "Synced"}
+                        </span>
+                      )}
+                      {ev.all_day && (
+                        <span className="dashboard-tag dashboard-tag--muted">
+                          All day
+                        </span>
+                      )}
+                    </div>
                     {ev.description && (
-                      <div style={{ fontSize: 14, marginTop: 4 }}>
-                        {ev.description}
-                      </div>
+                      <p className="dashboard-event-desc">{ev.description}</p>
                     )}
-                    <div style={{ fontSize: 13, opacity: 0.8, marginTop: 4 }}>
+                    <p className="dashboard-event-time">
                       {new Date(ev.start).toLocaleString()} -{" "}
                       {new Date(ev.end).toLocaleString()}
-                    </div>
+                    </p>
                   </div>
                   <button
+                    type="button"
+                    className="dashboard-button dashboard-button--ghost"
                     onClick={() => onDelete(ev.id)}
-                    style={{ height: 36 }}
                   >
                     Delete
                   </button>
-                </div>
-              </li>
-            ))}
-          </ul>
-        )}
-      </section>
-    </div>
+                </li>
+              ))}
+            </ul>
+          )}
+        </section>
+      </div>
+    </main>
   );
 }
