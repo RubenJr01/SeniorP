@@ -105,3 +105,7 @@ class EventOccurrenceSerializer(serializers.Serializer):
     is_recurring = serializers.BooleanField()
     recurrence_frequency = serializers.CharField()
     recurrence_interval = serializers.IntegerField()
+
+
+class BrightspaceImportSerializer(serializers.Serializer):
+    ics_url = serializers.URLField(required=False, allow_blank=True)

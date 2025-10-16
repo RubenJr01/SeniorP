@@ -1,8 +1,10 @@
 from urllib.parse import urlencode
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, time, date
 
 from dateutil import parser as date_parser
 from dateutil import rrule
+import requests
+from icalendar import Calendar
 from django.conf import settings
 from django.contrib.auth.models import User
 from django.http import HttpResponseRedirect
@@ -11,6 +13,7 @@ from rest_framework import generics, status, viewsets
 from rest_framework.permissions import AllowAny, IsAuthenticated
 from rest_framework.response import Response
 from rest_framework.views import APIView
+import re
 
 from .google_calendar import (
     GoogleSyncError,
@@ -21,8 +24,13 @@ from .google_calendar import (
     revoke_google_account,
     run_two_way_sync,
 )
-from .models import Event, GoogleAccount
-from .serializers import UserSerializer, EventSerializer, EventOccurrenceSerializer
+from .models import Event, GoogleAccount, BrightspaceFeed
+from .serializers import (
+    UserSerializer,
+    EventSerializer,
+    EventOccurrenceSerializer,
+    BrightspaceImportSerializer,
+)
 
 class CreateUserView(generics.CreateAPIView):
     queryset = User.objects.all()
@@ -177,6 +185,168 @@ class EventOccurrencesView(APIView):
         occurrences.sort(key=lambda item: item["start"])
         serializer = EventOccurrenceSerializer(occurrences, many=True)
         return Response(serializer.data)
+
+
+class BrightspaceImportView(APIView):
+    permission_classes = [IsAuthenticated]
+
+    @staticmethod
+    def _normalize_datetime(value):
+        if isinstance(value, datetime):
+            if timezone.is_naive(value):
+                value = timezone.make_aware(value, timezone.get_current_timezone())
+            return value
+        if isinstance(value, date):
+            naive = datetime.combine(value, time.min)
+            return timezone.make_aware(naive, timezone.get_current_timezone())
+        return None
+
+    def post(self, request):
+        serializer = BrightspaceImportSerializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+        provided_url = serializer.validated_data.get("ics_url", "").strip()
+
+        feed_instance = None
+        if provided_url:
+            feed_instance, _ = BrightspaceFeed.objects.update_or_create(
+                user=request.user,
+                defaults={"ics_url": provided_url},
+            )
+            ics_url = provided_url
+        else:
+            try:
+                feed_instance = request.user.brightspace_feed
+            except BrightspaceFeed.DoesNotExist:
+                feed_instance = None
+            if not feed_instance or not feed_instance.ics_url:
+                return Response(
+                    {"detail": "No saved Brightspace feed found. Please paste your iCal URL."},
+                    status=status.HTTP_400_BAD_REQUEST,
+                )
+            ics_url = feed_instance.ics_url
+
+        try:
+            response = requests.get(ics_url, timeout=15)
+            response.raise_for_status()
+        except requests.RequestException as exc:
+            return Response(
+                {"detail": f"Failed to download ICS feed: {exc}"},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        try:
+            calendar = Calendar.from_ical(response.content)
+        except ValueError:
+            return Response(
+                {"detail": "The provided ICS feed is not valid."},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        created = 0
+        updated = 0
+        skipped = 0
+
+        for component in calendar.walk("vevent"):
+            dtstart_prop = component.get("dtstart")
+            if dtstart_prop is None:
+                skipped += 1
+                continue
+
+            uid = str(component.get("uid", "")).strip()
+            if not uid:
+                skipped += 1
+                continue
+
+            summary = component.get("summary")
+            description = component.get("description")
+            location = component.get("location")
+            dtend_prop = component.get("dtend")
+            duration_prop = component.get("duration")
+
+            dtstart_raw = dtstart_prop.dt
+            dtend_raw = dtend_prop.dt if dtend_prop else None
+            duration_value = duration_prop.dt if duration_prop else None
+
+            is_all_day = isinstance(dtstart_raw, date) and not isinstance(dtstart_raw, datetime)
+
+            start_dt = self._normalize_datetime(dtstart_raw)
+            if start_dt is None:
+                skipped += 1
+                continue
+
+            if dtend_raw is not None:
+                end_dt = self._normalize_datetime(dtend_raw)
+                if end_dt is not None and is_all_day:
+                    end_dt = end_dt - timedelta(seconds=1)
+            elif isinstance(duration_value, timedelta):
+                end_dt = start_dt + duration_value
+            else:
+                end_dt = start_dt + (timedelta(days=1) if is_all_day else timedelta(hours=1))
+
+            if end_dt <= start_dt:
+                end_dt = start_dt + (timedelta(days=1) if is_all_day else timedelta(hours=1))
+
+            description_text = ""
+            if summary:
+                title = str(summary)
+            else:
+                title = "Brightspace event"
+            description_text = ""
+            if description:
+                raw_description = str(description)
+                description_clean = re.sub(r"https?://\S+", "", raw_description, flags=re.IGNORECASE)
+                description_text = description_clean.strip()
+            if location:
+                location_text = str(location)
+                if description_text:
+                    description_text = f"{description_text}\nLocation: {location_text}"
+                else:
+                    description_text = f"Location: {location_text}"
+
+            defaults = {
+                "title": title,
+                "description": description_text,
+                "start": start_dt,
+                "end": end_dt,
+                "all_day": is_all_day,
+                "source": Event.Source.BRIGHTSPACE,
+                "recurrence_frequency": Event.RecurrenceFrequency.NONE,
+                "recurrence_interval": 1,
+                "recurrence_count": None,
+                "recurrence_end_date": None,
+                "google_event_id": "",
+                "google_etag": "",
+                "google_ical_uid": uid,
+                "google_raw": {
+                    "source": "brightspace",
+                    "ics_url": ics_url,
+                },
+            }
+
+            event, event_created = Event.objects.update_or_create(
+                pilot=request.user,
+                google_ical_uid=uid,
+                defaults=defaults,
+            )
+            if event_created:
+                created += 1
+            else:
+                updated += 1
+
+        if feed_instance:
+            feed_instance.last_imported_at = timezone.now()
+            feed_instance.save(update_fields=["last_imported_at", "updated_at"])
+
+        return Response(
+            {
+                "created": created,
+                "updated": updated,
+                "skipped": skipped,
+                "saved_url": True,
+                "used_saved_url": not bool(provided_url),
+            },
+            status=status.HTTP_200_OK,
+        )
 
 
 class GoogleStatusView(APIView):

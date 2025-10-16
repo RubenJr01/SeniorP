@@ -137,7 +137,37 @@ To use Google synchronisation features:
 
 ---
 
-## 6. Running Both Services Together
+## 6. Optional – Brightspace (UTRGV) Calendar Import
+
+You can pull course events from UTRGV's Brightspace (D2L) calendar using the built-in iCal feed.
+
+1. Log in to Brightspace and open the **Calendar** tool.
+2. Select the course(s) you want included, then click **Settings** → **Subscribe** (or **Subscribe to Calendar** in the classic interface).
+3. Brightspace shows an **iCal subscription URL**. Copy the URL to your clipboard.
+4. In V-Cal, open the **Calendar** page and click **Import Brightspace**.
+5. Paste the iCal URL, submit the form, and wait a few seconds. Events are imported into your account with the source label **Brightspace**; existing events with the same UID are updated. The URL is stored securely per user so future imports only require clicking **Import Brightspace** (leave the field empty to refresh with the saved feed).
+
+You can also trigger the import via the API:
+
+```bash
+# First-time import (saves the URL)
+curl -X POST http://localhost:8000/api/calendar/brightspace/import/ \
+  -H "Authorization: Bearer <your-access-token>" \
+  -H "Content-Type: application/json" \
+  -d '{"ics_url": "https://byui.brightspace.com/d2l/le/calendar/export/ical/..."}'
+
+# Subsequent refresh using the stored URL
+curl -X POST http://localhost:8000/api/calendar/brightspace/import/ \
+  -H "Authorization: Bearer <your-access-token>" \
+  -H "Content-Type: application/json" \
+  -d '{}'
+```
+
+> The backend stores both the iCal URL and individual event UIDs, so re-importing keeps events in sync instead of duplicating them.
+
+---
+
+## 7. Running Both Services Together
 
 | Terminal | Command                                       | URL                                   |
 |----------|-----------------------------------------------|----------------------------------------|
@@ -148,7 +178,7 @@ Open <http://localhost:5173> in a browser, register or log in, and start creatin
 
 ---
 
-## 7. Useful Development Commands
+## 8. Useful Development Commands
 
 | Purpose                          | Command                                             |
 |----------------------------------|------------------------------------------------------|
@@ -160,17 +190,18 @@ Open <http://localhost:5173> in a browser, register or log in, and start creatin
 
 ---
 
-## 8. Troubleshooting
+## 9. Troubleshooting
 
 - **Backend fails to start**: Ensure the virtual environment is active and dependencies are installed; check for missing `.env` keys.
 - **Frontend cannot reach API**: Confirm `VITE_API_URL` is correct and the backend is running on port 8000.
 - **CORS errors**: Verify `DJANGO_CORS_ALLOWED_ORIGINS` and `FRONTEND_APP_URL` in `backend/.env` match the frontend origin exactly.
 - **Google OAuth errors**: Double-check the redirect URI and authorised origins in the Google Cloud Console; restart the backend after editing `.env`.
 - **Recurring events not appearing**: Make sure you ran `python manage.py migrate` after pulling the latest code so the recurrence fields are created in the database.
+- **Brightspace import fails**: Confirm the iCal URL loads in a browser (it should download an `.ics` file) and that you are logged in to V-Cal before importing.
 
 ---
 
-## 9. Cleaning Up
+## 10. Cleaning Up
 
 To stop the dev servers, press `Ctrl+C` in each terminal.  
 Deactivate the Python virtual environment when finished:
@@ -191,7 +222,7 @@ Remove-Item -Recurse -Force env  # or rm -rf env on macOS/Linux
 
 ---
 
-## 10. Next Steps
+## 11. Next Steps
 
 - Commit your work (`git add ... && git commit`) and push to your chosen branch.
 - Deploy the backend and frontend or containerise for production.

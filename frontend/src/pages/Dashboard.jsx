@@ -4,41 +4,6 @@ import api from "../api";
 import Navigation from "../components/Navigation";
 import "../styles/Dashboard.css";
 
-function isoLocal(date) {
-  const pad = (n) => String(n).padStart(2, "0");
-  const d = new Date(date);
-  const y = d.getFullYear();
-  const m = pad(d.getMonth() + 1);
-  const day = pad(d.getDate());
-  const h = pad(d.getHours());
-  const min = pad(d.getMinutes());
-  return `${y}-${m}-${day}T${h}:${min}`;
-}
-
-function isoDate(date) {
-  const d = new Date(date);
-  const y = d.getFullYear();
-  const m = String(d.getMonth() + 1).padStart(2, "0");
-  const day = String(d.getDate()).padStart(2, "0");
-  return `${y}-${m}-${day}`;
-}
-
-function createInitialForm() {
-  const now = new Date();
-  const inOneHour = new Date(now.getTime() + 60 * 60 * 1000);
-  return {
-    title: "",
-    description: "",
-    startDateTime: isoLocal(now),
-    endDateTime: isoLocal(inOneHour),
-    startDate: isoDate(now),
-    all_day: false,
-    recurrence_enabled: false,
-    recurrence_frequency: "weekly",
-    recurrence_interval: 1,
-  };
-}
-
 function formatRecurrenceLabel(frequency, interval) {
   if (!frequency || frequency === "none") {
     return "";
@@ -60,9 +25,7 @@ export default function Dashboard() {
   const location = useLocation();
   const [events, setEvents] = useState([]);
   const [loading, setLoading] = useState(true);
-  const [form, setForm] = useState(() => createInitialForm());
-  const [submitting, setSubmitting] = useState(false);
-  const [error, setError] = useState("");
+  const [fetchError, setFetchError] = useState("");
   const [googleStatus, setGoogleStatus] = useState({ connected: false });
   const [googleLoading, setGoogleLoading] = useState(true);
   const [googleWorking, setGoogleWorking] = useState(false);
@@ -71,11 +34,11 @@ export default function Dashboard() {
   const fetchOccurrences = useCallback(async () => {
     try {
       setLoading(true);
-      setError("");
+      setFetchError("");
       const { data } = await api.get("/api/events/occurrences/");
       setEvents(data);
     } catch {
-      setError("Failed to load events.");
+      setFetchError("Failed to load events.");
     } finally {
       setLoading(false);
     }
@@ -214,151 +177,6 @@ export default function Dashboard() {
       setGoogleWorking(false);
     }
   }, [loadGoogleStatus]);
-
-  const onChange = (e) => {
-    const { name, value, type, checked } = e.target;
-    setForm((f) => {
-      if (name === "all_day") {
-        if (checked) {
-          return { ...f, all_day: true, startDate: isoDate(f.startDateTime) };
-        }
-        return { ...f, all_day: false };
-      }
-      if (name === "startDate") {
-        if (!value) {
-          return { ...f, startDate: value };
-        }
-        const base = new Date(value);
-        if (Number.isNaN(base.getTime())) {
-          return { ...f, startDate: value };
-        }
-        const startDateTime = new Date(f.startDateTime);
-        startDateTime.setFullYear(
-          base.getFullYear(),
-          base.getMonth(),
-          base.getDate(),
-        );
-        const endDateTime = new Date(f.endDateTime);
-        endDateTime.setFullYear(
-          base.getFullYear(),
-          base.getMonth(),
-          base.getDate(),
-        );
-        return {
-          ...f,
-          startDate: value,
-          startDateTime: isoLocal(startDateTime),
-          endDateTime: isoLocal(endDateTime),
-        };
-      }
-      if (name === "startDateTime") {
-        let nextEnd = f.endDateTime;
-        const newStart = new Date(value);
-        if (!Number.isNaN(newStart.getTime())) {
-          const currentEnd = new Date(f.endDateTime);
-          if (Number.isNaN(currentEnd.getTime()) || currentEnd <= newStart) {
-            const bumped = new Date(newStart.getTime() + 60 * 60 * 1000);
-            nextEnd = isoLocal(bumped);
-          }
-        }
-        return {
-          ...f,
-          startDateTime: value,
-          endDateTime: nextEnd,
-          startDate: value ? isoDate(value) : f.startDate,
-        };
-      }
-      if (name === "recurrence_enabled") {
-        const enabled = !!checked;
-        return {
-          ...f,
-          recurrence_enabled: enabled,
-          recurrence_frequency: enabled ? f.recurrence_frequency || "weekly" : "weekly",
-          recurrence_interval: enabled ? f.recurrence_interval || 1 : 1,
-        };
-      }
-      if (name === "recurrence_frequency") {
-        return {
-          ...f,
-          recurrence_frequency: value,
-        };
-      }
-      if (name === "recurrence_interval") {
-        const parsed = Math.max(1, Number(value) || 1);
-        return {
-          ...f,
-          recurrence_interval: parsed,
-        };
-      }
-      return {
-        ...f,
-        [name]: type === "checkbox" ? checked : value,
-      };
-    });
-  };
-
-  const onSubmit = async (e) => {
-    e.preventDefault();
-    setSubmitting(true);
-    setError("");
-
-    let startDate;
-    let endDate;
-
-    if (form.all_day) {
-      if (!form.startDate) {
-        setError("Please choose a date.");
-        setSubmitting(false);
-        return;
-      }
-      const day = new Date(form.startDate);
-      if (Number.isNaN(day.getTime())) {
-        setError("Invalid date selected.");
-        setSubmitting(false);
-        return;
-      }
-      day.setHours(0, 0, 0, 0);
-      startDate = day;
-      endDate = new Date(day);
-      endDate.setHours(23, 59, 59, 999);
-    } else {
-      startDate = new Date(form.startDateTime);
-      endDate = new Date(form.endDateTime);
-      if (Number.isNaN(startDate.getTime()) || Number.isNaN(endDate.getTime())) {
-        setError("Please provide valid start and end times.");
-        setSubmitting(false);
-        return;
-      }
-      if (endDate < startDate) {
-        setError("End must be after start.");
-        setSubmitting(false);
-        return;
-      }
-    }
-
-    const isRecurring = !!form.recurrence_enabled;
-    const payload = {
-      title: form.title.trim(),
-      description: form.description.trim(),
-      all_day: !!form.all_day,
-      start: startDate.toISOString(),
-      end: endDate.toISOString(),
-      recurrence_frequency: isRecurring ? form.recurrence_frequency : "none",
-      recurrence_interval: isRecurring ? Number(form.recurrence_interval || 1) : 1,
-      recurrence_count: null,
-      recurrence_end_date: null,
-    };
-
-    try {
-      await api.post("/api/events/", payload);
-      setForm(() => createInitialForm());
-      await fetchOccurrences();
-    } catch {
-      setError("Could not create event.");
-    } finally {
-      setSubmitting(false);
-    }
-  };
 
   const onDelete = async (eventId, isRecurring) => {
     const message = isRecurring
@@ -568,125 +386,6 @@ export default function Dashboard() {
                 </>
               )}
             </section>
-
-            <section className="dashboard-panel">
-              <div className="dashboard-panel-heading">
-                <div>
-                  <h2>Create mission</h2>
-                  <p>Capture sortie details and share instantly with the team.</p>
-                </div>
-              </div>
-              <form className="dashboard-form" onSubmit={onSubmit}>
-                <label className="dashboard-label">
-                  <span>Title</span>
-                  <input
-                    className="dashboard-input"
-                    name="title"
-                    value={form.title}
-                    onChange={onChange}
-                    placeholder="Mission title"
-                    required
-                  />
-                </label>
-                <label className="dashboard-label">
-                  <span>Description</span>
-                  <textarea
-                    className="dashboard-input"
-                    name="description"
-                    value={form.description}
-                    onChange={onChange}
-                    placeholder="Description (optional)"
-                    rows={3}
-                  />
-                </label>
-                <label className="dashboard-label">
-                  <span>Start</span>
-                  {!form.all_day ? (
-                    <input
-                      className="dashboard-input"
-                      type="datetime-local"
-                      name="startDateTime"
-                      value={form.startDateTime}
-                      onChange={onChange}
-                      required
-                    />
-                  ) : (
-                    <input
-                      className="dashboard-input"
-                      type="date"
-                      name="startDate"
-                      value={form.startDate}
-                      onChange={onChange}
-                      required
-                    />
-                  )}
-                </label>
-                {!form.all_day && (
-                  <label className="dashboard-label">
-                    <span>End</span>
-                    <input
-                      className="dashboard-input"
-                      type="datetime-local"
-                      name="endDateTime"
-                      value={form.endDateTime}
-                      onChange={onChange}
-                      required
-                    />
-                  </label>
-                )}
-                {form.all_day && (
-                  <p className="dashboard-note">
-                    End of day is applied automatically for all-day events.
-                  </p>
-                )}
-              <label className="dashboard-check">
-                <input
-                  type="checkbox"
-                  name="all_day"
-                  checked={form.all_day}
-                  onChange={onChange}
-                />
-                <span>All day</span>
-              </label>
-              <label className="dashboard-check">
-                <input
-                  type="checkbox"
-                  name="recurrence_enabled"
-                  checked={form.recurrence_enabled}
-                  onChange={onChange}
-                />
-                <span>Recurring event</span>
-              </label>
-              {form.recurrence_enabled && (
-                <>
-                  <label className="dashboard-label">
-                    <span>Repeats</span>
-                    <select
-                      className="dashboard-input"
-                      name="recurrence_frequency"
-                      value={form.recurrence_frequency}
-                      onChange={onChange}
-                    >
-                      <option value="daily">Daily</option>
-                      <option value="weekly">Weekly</option>
-                      <option value="monthly">Monthly</option>
-                      <option value="yearly">Yearly</option>
-                    </select>
-                  </label>
-                  <span className="dashboard-note">
-                    {formatRecurrenceLabel(
-                      form.recurrence_frequency,
-                      form.recurrence_interval
-                    )}
-                  </span>
-                </>
-              )}
-              <button className="dashboard-button" type="submit" disabled={submitting}>
-                {submitting ? "Saving..." : "Add mission"}
-              </button>
-              {error && <p className="dashboard-error">{error}</p>}
-            </form>
-            </section>
           </div>
 
           <section className="dashboard-panel dashboard-panel--list">
@@ -696,6 +395,7 @@ export default function Dashboard() {
                 <p>{!loading && hasEvents ? eventCountLabel : "Chronological view of your activity."}</p>
               </div>
             </div>
+            {fetchError && <p className="dashboard-error">{fetchError}</p>}
             {loading ? (
               <p className="dashboard-muted">Loading...</p>
             ) : !hasEvents ? (
@@ -731,10 +431,16 @@ export default function Dashboard() {
                             className={`dashboard-tag ${
                               ev.source === "google"
                                 ? "dashboard-tag--google"
+                                : ev.source === "brightspace"
+                                ? "dashboard-tag--brightspace"
                                 : "dashboard-tag--sync"
                             }`}
                           >
-                            {ev.source === "google" ? "Google" : "Synced"}
+                            {ev.source === "google"
+                              ? "Google"
+                              : ev.source === "brightspace"
+                              ? "Brightspace"
+                              : "Synced"}
                           </span>
                         )}
                         {ev.is_recurring && (

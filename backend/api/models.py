@@ -9,6 +9,7 @@ class Event(models.Model):
     LOCAL = "local", "Created in app"
     GOOGLE = "google", "Created in Google"
     SYNCED = "synced", "Synced between app and Google"
+    BRIGHTSPACE = "brightspace", "Imported from Brightspace"
 
   class RecurrenceFrequency(models.TextChoices):
     NONE = "none", "Does not repeat"
@@ -126,4 +127,19 @@ class GoogleAccount(models.Model):
 
   class Meta:
     unique_together = (("user", "google_user_id"),)
+
+
+class BrightspaceFeed(models.Model):
+  user = models.OneToOneField(
+    User,
+    on_delete=models.CASCADE,
+    related_name="brightspace_feed",
+  )
+  ics_url = models.URLField()
+  last_imported_at = models.DateTimeField(null=True, blank=True)
+  created_at = models.DateTimeField(auto_now_add=True)
+  updated_at = models.DateTimeField(auto_now=True)
+
+  def __str__(self):
+    return f"{self.user.username} Brightspace feed"
 

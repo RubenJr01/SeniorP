@@ -96,10 +96,14 @@ function Calendar() {
   const [events, setEvents] = useState([]);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
-  const [isModalOpen, setIsModalOpen] = useState(false);
-  const [form, setForm] = useState(() => createInitialForm());
-  const [submitting, setSubmitting] = useState(false);
-  const [formError, setFormError] = useState("");
+const [isModalOpen, setIsModalOpen] = useState(false);
+const [form, setForm] = useState(() => createInitialForm());
+const [submitting, setSubmitting] = useState(false);
+const [formError, setFormError] = useState("");
+const [isImportModalOpen, setIsImportModalOpen] = useState(false);
+const [importUrl, setImportUrl] = useState("");
+const [importError, setImportError] = useState("");
+const [importLoading, setImportLoading] = useState(false);
 
   const currentMonthKey = useMemo(() => getMonthKey(referenceDate), [referenceDate]);
 
@@ -168,6 +172,17 @@ function Calendar() {
   const handleCloseModal = () => {
     setIsModalOpen(false);
     setFormError("");
+  };
+
+  const handleOpenImportModal = () => {
+    setIsImportModalOpen(true);
+    setImportUrl("");
+    setImportError("");
+  };
+
+  const handleCloseImportModal = () => {
+    setIsImportModalOpen(false);
+    setImportError("");
   };
 
   const handleDayClick = (cell) => {
@@ -270,6 +285,25 @@ function Calendar() {
     });
   };
 
+  const handleImportSubmit = async (event) => {
+    event.preventDefault();
+    const trimmed = importUrl.trim();
+    setImportLoading(true);
+    setImportError("");
+    try {
+      const payload = trimmed ? { ics_url: trimmed } : {};
+      const { data } = await api.post("/api/calendar/brightspace/import/", payload);
+      setIsImportModalOpen(false);
+      setImportUrl("");
+      await refreshOccurrences(referenceDate);
+    } catch (err) {
+      const message = err.response?.data?.detail || "Failed to import Brightspace calendar.";
+      setImportError(message);
+    } finally {
+      setImportLoading(false);
+    }
+  };
+
   const handleSubmit = async (e) => {
     e.preventDefault();
     setSubmitting(true);
@@ -353,6 +387,13 @@ function Calendar() {
               <button type="button" className="calendar-btn" onClick={handleToday}>
                 Today
               </button>
+              <button
+                type="button"
+                className="calendar-btn calendar-btn--secondary"
+                onClick={handleOpenImportModal}
+              >
+                Import Brightspace
+              </button>
               <button type="button" className="calendar-btn" onClick={handleNextMonth}>
                 Next
               </button>
@@ -372,6 +413,15 @@ function Calendar() {
                 role={cell.inCurrentMonth ? "button" : undefined}
                 tabIndex={cell.inCurrentMonth ? 0 : -1}
                 onClick={() => handleDayClick(cell)}
+                onKeyDown={(event) => {
+                  if (!cell.inCurrentMonth) {
+                    return;
+                  }
+                  if (event.key === "Enter" || event.key === " ") {
+                    event.preventDefault();
+                    handleDayClick(cell);
+                  }
+                }}
               >
                 <span className="calendar-day__date">{cell.label}</span>
                 <div className="calendar-day__events">
@@ -542,6 +592,65 @@ function Calendar() {
                 </button>
                 <button type="submit" className="calendar-btn" disabled={submitting}>
                   {submitting ? "Saving..." : "Add mission"}
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+      {isImportModalOpen && (
+        <div className="calendar-modal-overlay" onClick={handleCloseImportModal}>
+          <div
+            className="calendar-modal calendar-modal--narrow"
+            onClick={(event) => event.stopPropagation()}
+          >
+            <div className="calendar-modal-header">
+              <h2>Import Brightspace calendar</h2>
+              <button
+                type="button"
+                className="calendar-modal-close"
+                onClick={handleCloseImportModal}
+                aria-label="Close"
+              >
+                ×
+              </button>
+            </div>
+            <p className="calendar-modal-subtitle">
+              Paste the Brightspace iCal subscription link from UTRGV to import upcoming classes
+              and deadlines into V-Cal. After the first import we remember the link, so you can
+              leave the field blank next time to refresh.
+            </p>
+            <form className="calendar-modal-form" onSubmit={handleImportSubmit}>
+              <label className="calendar-modal-label">
+                <span>iCal subscription URL</span>
+                <input
+                  className="calendar-modal-input"
+                  type="url"
+                  name="importUrl"
+                  placeholder="https://..."
+                  value={importUrl}
+                  onChange={(event) => setImportUrl(event.target.value)}
+                />
+              </label>
+              <p className="calendar-modal-note">
+                In Brightspace, open the calendar, choose <em>Subscribe</em>, copy the iCal URL, and
+                paste it here. Leave the field empty to reuse your previously saved feed.
+              </p>
+              {importError && <p className="calendar-modal-error">{importError}</p>}
+              <div className="calendar-modal-actions">
+                <button
+                  type="button"
+                  className="calendar-btn calendar-btn--ghost"
+                  onClick={handleCloseImportModal}
+                >
+                  Cancel
+                </button>
+                <button
+                  type="submit"
+                  className="calendar-btn calendar-btn--secondary"
+                  disabled={importLoading}
+                >
+                  {importLoading ? "Importing..." : "Import"}
                 </button>
               </div>
             </form>

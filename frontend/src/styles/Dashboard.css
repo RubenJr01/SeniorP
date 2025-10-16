@@ -460,6 +460,11 @@
   color: #166534;
 }
 
+.dashboard-tag--brightspace {
+  background: rgba(251, 191, 36, 0.2);
+  color: #92400e;
+}
+
 .dashboard-tag--recurring {
   background: rgba(244, 114, 182, 0.18);
   color: #9d174d;
