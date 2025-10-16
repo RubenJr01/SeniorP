@@ -14,6 +14,9 @@ class Migration(migrations.Migration):
     operations = [
         migrations.AddConstraint(
             model_name='event',
-            constraint=models.CheckConstraint(condition=models.Q(('end__gte', models.F('start'))), name='event_end_gte_start'),
+            constraint=models.CheckConstraint(
+                check=models.Q(end__gte=models.F('start')),
+                name='event_end_gte_start',
+            ),
         ),
     ]

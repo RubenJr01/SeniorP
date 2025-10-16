@@ -425,9 +425,7 @@ const [importLoading, setImportLoading] = useState(false);
               >
                 <span className="calendar-day__date">{cell.label}</span>
                 <div className="calendar-day__events">
-                  {cell.events.length === 0 && cell.inCurrentMonth && !loading ? (
-                    <span className="calendar-day__more">No missions</span>
-                  ) : (
+                  {cell.events.length > 0 &&
                     cell.events.slice(0, 3).map((event) => (
                       <div className="calendar-event" key={event.occurrence_id}>
                         <span>{event.title}</span>
@@ -443,8 +441,7 @@ const [importLoading, setImportLoading] = useState(false);
                           })}
                         </span>
                       </div>
-                    ))
-                  )}
+                    ))}
                   {cell.events.length > 3 && (
                     <span className="calendar-day__more">
                       +{cell.events.length - 3} more

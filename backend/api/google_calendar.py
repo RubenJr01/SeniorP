@@ -198,7 +198,7 @@ def _event_defaults_from_google(google_event: Dict) -> Dict:
 
 
 @transaction.atomic
-def apply_google_event(account: GoogleAccount, google_event: Dict) -> Tuple[str, Event | None]:
+def apply_google_event(account: GoogleAccount, google_event: Dict) -> Tuple[str, Optional[Event]]:
   user = account.user
   event_id = google_event.get("id", "")
   ical_uid = google_event.get("iCalUID", "")
