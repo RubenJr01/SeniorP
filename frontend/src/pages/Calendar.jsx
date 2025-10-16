@@ -1,32 +1,26 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
+
 import Navigation from "../components/Navigation";
-import api from "../api";
+import {
+  addMonths,
+  endOfMonth,
+  formatMonthTitle,
+  isoDate,
+  isoLocal,
+  startOfMonth,
+} from "../utils/date";
+import { formatRecurrenceLabel } from "../utils/recurrence";
+import { createEvent, fetchOccurrences } from "../services/events";
+
 import "../styles/Calendar.css";
 
 const WEEKDAY_LABELS = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
-
-function isoLocal(date) {
-  const d = new Date(date);
-  const y = d.getFullYear();
-  const m = String(d.getMonth() + 1).padStart(2, "0");
-  const day = String(d.getDate()).padStart(2, "0");
-  const h = String(d.getHours()).padStart(2, "0");
-  const min = String(d.getMinutes()).padStart(2, "0");
-  return `${y}-${m}-${day}T${h}:${min}`;
-}
-
-function isoDate(date) {
-  const d = new Date(date);
-  const y = d.getFullYear();
-  const m = String(d.getMonth() + 1).padStart(2, "0");
-  const day = String(d.getDate()).padStart(2, "0");
-  return `${y}-${m}-${day}`;
-}
 
 function createInitialForm(baseDate = new Date()) {
   const start = new Date(baseDate);
   start.setHours(9, 0, 0, 0);
   const end = new Date(start.getTime() + 60 * 60 * 1000);
+
   return {
     title: "",
     description: "",
@@ -38,45 +32,6 @@ function createInitialForm(baseDate = new Date()) {
     recurrence_frequency: "weekly",
     recurrence_interval: 1,
   };
-}
-
-function formatRecurrenceLabel(frequency, interval) {
-  if (!frequency || frequency === "none") {
-    return "";
-  }
-  const unitMap = {
-    daily: "day",
-    weekly: "week",
-    monthly: "month",
-    yearly: "year",
-  };
-  const unit = unitMap[frequency] || "cycle";
-  if (interval === 1) {
-    return `Repeats every ${unit}`;
-  }
-  return `Repeats every ${interval} ${unit}${interval > 1 ? "s" : ""}`;
-}
-
-function getMonthKey(date) {
-  return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, "0")}`;
-}
-
-function startOfMonth(date) {
-  return new Date(date.getFullYear(), date.getMonth(), 1);
-}
-
-function endOfMonth(date) {
-  return new Date(date.getFullYear(), date.getMonth() + 1, 0, 23, 59, 59, 999);
-}
-
-function addMonths(date, amount) {
-  const copy = new Date(date);
-  copy.setMonth(copy.getMonth() + amount);
-  return copy;
-}
-
-function formatMonthTitle(date) {
-  return date.toLocaleDateString(undefined, { month: "long", year: "numeric" });
 }
 
 function groupEventsByDay(events) {
@@ -91,17 +46,15 @@ function groupEventsByDay(events) {
   return map;
 }
 
-function Calendar() {
+export default function Calendar() {
   const [referenceDate, setReferenceDate] = useState(startOfMonth(new Date()));
   const [events, setEvents] = useState([]);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
-const [isModalOpen, setIsModalOpen] = useState(false);
-const [form, setForm] = useState(() => createInitialForm());
-const [submitting, setSubmitting] = useState(false);
-const [formError, setFormError] = useState("");
-
-  const currentMonthKey = useMemo(() => getMonthKey(referenceDate), [referenceDate]);
+  const [isModalOpen, setIsModalOpen] = useState(false);
+  const [form, setForm] = useState(() => createInitialForm());
+  const [submitting, setSubmitting] = useState(false);
+  const [formError, setFormError] = useState("");
 
   const refreshOccurrences = useCallback(
     async (targetDate) => {
@@ -111,11 +64,10 @@ const [formError, setFormError] = useState("");
       try {
         const monthStart = startOfMonth(month);
         const monthEnd = endOfMonth(month);
-        const params = new URLSearchParams({
+        const data = await fetchOccurrences({
           start: monthStart.toISOString(),
           end: monthEnd.toISOString(),
         });
-        const { data } = await api.get(`/api/events/occurrences/?${params.toString()}`);
         setEvents(data);
       } catch (err) {
         console.error(err);
@@ -147,7 +99,7 @@ const [formError, setFormError] = useState("");
       cellDate.setDate(1 + dayOffset);
 
       const inCurrentMonth = cellDate.getMonth() === referenceDate.getMonth();
-      const displayDate = inCurrentMonth ? cellDate.getDate() : cellDate.getDate();
+      const displayDate = cellDate.getDate();
       const dayKey = cellDate.toISOString().slice(0, 10);
       const dayEvents = eventsByDay.get(dayKey) ?? [];
 
@@ -165,113 +117,102 @@ const [formError, setFormError] = useState("");
   const handlePrevMonth = () => setReferenceDate((date) => startOfMonth(addMonths(date, -1)));
   const handleNextMonth = () => setReferenceDate((date) => startOfMonth(addMonths(date, 1)));
   const handleToday = () => setReferenceDate(startOfMonth(new Date()));
+
   const handleCloseModal = () => {
     setIsModalOpen(false);
     setFormError("");
+    setForm(createInitialForm(referenceDate));
   };
 
   const handleDayClick = (cell) => {
     if (!cell.inCurrentMonth) {
       return;
     }
-    const initialForm = createInitialForm(cell.date);
-    setForm(initialForm);
+    setForm(createInitialForm(cell.date));
     setFormError("");
     setIsModalOpen(true);
   };
 
-  const onFormChange = (e) => {
-    const { name, value, type, checked } = e.target;
-    setForm((f) => {
+  const onFormChange = (event) => {
+    const { name, value, type, checked } = event.target;
+    setForm((previous) => {
       if (name === "all_day") {
         if (checked) {
-          const start = new Date(f.startDateTime);
+          const start = new Date(previous.startDateTime);
           return {
-            ...f,
+            ...previous,
             all_day: true,
             startDate: isoDate(start),
           };
         }
         return {
-          ...f,
+          ...previous,
           all_day: false,
         };
       }
+
       if (name === "startDate") {
         if (!value) {
-          return { ...f, startDate: value };
+          return { ...previous, startDate: value };
         }
         const base = new Date(value);
         if (Number.isNaN(base.getTime())) {
-          return { ...f, startDate: value };
+          return { ...previous, startDate: value };
         }
-        const startDateTime = new Date(f.startDateTime);
-        startDateTime.setFullYear(
-          base.getFullYear(),
-          base.getMonth(),
-          base.getDate(),
-        );
-        const endDateTime = new Date(f.endDateTime);
-        endDateTime.setFullYear(
-          base.getFullYear(),
-          base.getMonth(),
-          base.getDate(),
-        );
+        const startDateTime = new Date(previous.startDateTime);
+        startDateTime.setFullYear(base.getFullYear(), base.getMonth(), base.getDate());
+        const endDateTime = new Date(previous.endDateTime);
+        endDateTime.setFullYear(base.getFullYear(), base.getMonth(), base.getDate());
         return {
-          ...f,
+          ...previous,
           startDate: value,
           startDateTime: isoLocal(startDateTime),
           endDateTime: isoLocal(endDateTime),
         };
       }
+
       if (name === "startDateTime") {
-        let nextEnd = f.endDateTime;
+        let nextEnd = previous.endDateTime;
         const newStart = new Date(value);
         if (!Number.isNaN(newStart.getTime())) {
-          const currentEnd = new Date(f.endDateTime);
+          const currentEnd = new Date(previous.endDateTime);
           if (Number.isNaN(currentEnd.getTime()) || currentEnd <= newStart) {
             const bumped = new Date(newStart.getTime() + 60 * 60 * 1000);
             nextEnd = isoLocal(bumped);
           }
         }
         return {
-          ...f,
+          ...previous,
           startDateTime: value,
           endDateTime: nextEnd,
-          startDate: value ? isoDate(value) : f.startDate,
+          startDate: value ? isoDate(value) : previous.startDate,
         };
       }
-      if (name === "recurrence_enabled") {
-        const enabled = !!checked;
-        return {
-          ...f,
-          recurrence_enabled: enabled,
-          recurrence_frequency: enabled ? f.recurrence_frequency || "weekly" : "weekly",
-          recurrence_interval: enabled ? f.recurrence_interval || 1 : 1,
-        };
-      }
-      if (name === "recurrence_frequency") {
-        return {
-          ...f,
-          recurrence_frequency: value,
-        };
-      }
+
       if (name === "recurrence_interval") {
-        const parsed = Math.max(1, Number(value) || 1);
+        const numeric = Number(value) || 1;
         return {
-          ...f,
-          recurrence_interval: parsed,
+          ...previous,
+          recurrence_interval: Math.max(1, numeric),
         };
       }
+
+      if (type === "checkbox") {
+        return {
+          ...previous,
+          [name]: checked,
+        };
+      }
+
       return {
-        ...f,
-        [name]: type === "checkbox" ? checked : value,
+        ...previous,
+        [name]: value,
       };
     });
   };
 
-  const handleSubmit = async (e) => {
-    e.preventDefault();
+  const handleSubmit = async (event) => {
+    event.preventDefault();
     setSubmitting(true);
     setFormError("");
 
@@ -310,21 +251,20 @@ const [formError, setFormError] = useState("");
       }
     }
 
-    const isRecurring = !!form.recurrence_enabled;
     const payload = {
-      title: form.title.trim(),
-      description: form.description.trim(),
-      all_day: !!form.all_day,
+      title: form.title,
+      description: form.description,
       start: startDateValue.toISOString(),
       end: endDateValue.toISOString(),
-      recurrence_frequency: isRecurring ? form.recurrence_frequency : "none",
-      recurrence_interval: isRecurring ? Number(form.recurrence_interval || 1) : 1,
-      recurrence_count: null,
+      all_day: form.all_day,
+      recurrence_frequency: form.recurrence_enabled ? form.recurrence_frequency : "none",
+      recurrence_interval: form.recurrence_enabled ? form.recurrence_interval : 1,
+      recurrence_count: form.recurrence_enabled ? null : null,
       recurrence_end_date: null,
     };
 
     try {
-      await api.post("/api/events/", payload);
+      await createEvent(payload);
       setIsModalOpen(false);
       setForm(createInitialForm(startDateValue));
       await refreshOccurrences(referenceDate);
@@ -372,12 +312,10 @@ const [formError, setFormError] = useState("");
                 role={cell.inCurrentMonth ? "button" : undefined}
                 tabIndex={cell.inCurrentMonth ? 0 : -1}
                 onClick={() => handleDayClick(cell)}
-                onKeyDown={(event) => {
-                  if (!cell.inCurrentMonth) {
-                    return;
-                  }
-                  if (event.key === "Enter" || event.key === " ") {
-                    event.preventDefault();
+                onKeyDown={(eventKey) => {
+                  if (!cell.inCurrentMonth) return;
+                  if (eventKey.key === "Enter" || eventKey.key === " ") {
+                    eventKey.preventDefault();
                     handleDayClick(cell);
                   }
                 }}
@@ -387,16 +325,11 @@ const [formError, setFormError] = useState("");
                   {cell.events.length === 0 && cell.inCurrentMonth && !loading ? (
                     <span className="calendar-day__more">No missions</span>
                   ) : (
-                    cell.events.slice(0, 3).map((event) => (
-                      <div className="calendar-event" key={event.occurrence_id}>
-                        <span>{event.title}</span>
+                    cell.events.slice(0, 3).map((eventItem) => (
+                      <div className="calendar-event" key={eventItem.occurrence_id}>
+                        <span>{eventItem.title}</span>
                         <span className="calendar-event__time">
-                          {new Date(event.start).toLocaleTimeString([], {
-                            hour: "2-digit",
-                            minute: "2-digit",
-                          })}
-                          {" - "}
-                          {new Date(event.end).toLocaleTimeString([], {
+                          {new Date(eventItem.start).toLocaleTimeString([], {
                             hour: "2-digit",
                             minute: "2-digit",
                           })}
@@ -404,28 +337,34 @@ const [formError, setFormError] = useState("");
                       </div>
                     ))
                   )}
-                  {cell.events.length > 3 && (
-                    <span className="calendar-day__more">
-                      +{cell.events.length - 3} more
-                    </span>
-                  )}
                 </div>
               </div>
             ))}
           </section>
 
-          {loading && <p className="calendar-empty">Loading calendar…</p>}
-          {!loading && error && <p className="calendar-empty">{error}</p>}
-          {!loading && !error && events.length === 0 && (
-            <p className="calendar-empty">No events scheduled this month.</p>
-          )}
+          {error && <p className="calendar-error">{error}</p>}
+
+          <section className="calendar-meta">
+            <div>
+              <h2>Upcoming missions</h2>
+              <p>
+                {events.length > 0
+                  ? "Tap a day to schedule a new sortie."
+                  : "No missions scheduled this month."}
+              </p>
+            </div>
+          </section>
         </div>
       </main>
+
       {isModalOpen && (
         <div className="calendar-modal-overlay" onClick={handleCloseModal}>
-          <div className="calendar-modal" onClick={(event) => event.stopPropagation()}>
+          <div
+            className="calendar-modal calendar-modal--narrow"
+            onClick={(eventClick) => eventClick.stopPropagation()}
+          >
             <div className="calendar-modal-header">
-              <h2>Create mission</h2>
+              <h2>Add mission</h2>
               <button
                 type="button"
                 className="calendar-modal-close"
@@ -561,4 +500,3 @@ const [formError, setFormError] = useState("");
   );
 }
 
-export default Calendar;

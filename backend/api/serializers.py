@@ -1,10 +1,24 @@
+from __future__ import annotations
+
+from datetime import datetime
+
 from django.contrib.auth.models import User
 from django.utils import timezone
 from rest_framework import serializers
+
 from .models import Event
 
+__all__ = [
+    "UserSerializer",
+    "EventSerializer",
+    "EventOccurrenceSerializer",
+    "BrightspaceImportSerializer",
+]
+
+
 class UserSerializer(serializers.ModelSerializer):
-    # Register a new user with a hashed password
+    """Register a new user with a hashed password."""
+
     class Meta:
         model = User
         fields = ("id", "username", "password")
@@ -16,10 +30,11 @@ class UserSerializer(serializers.ModelSerializer):
         user.save()
         return user
 
+
 class EventSerializer(serializers.ModelSerializer):
-    # Expose pilot as ID, but don't allow client to set it
+    """Expose mission events while keeping pilot assignment server-side."""
+
     pilot = serializers.PrimaryKeyRelatedField(read_only=True)
-    # Show the pilot's username
     pilot_username = serializers.CharField(source="pilot.username", read_only=True)
 
     class Meta:
@@ -41,7 +56,6 @@ class EventSerializer(serializers.ModelSerializer):
             "created_at",
             "updated_at",
         )
-
         read_only_fields = (
             "id",
             "pilot",
@@ -57,24 +71,33 @@ class EventSerializer(serializers.ModelSerializer):
         }
 
     def validate(self, attrs):
-        start = attrs.get("start")
-        end = attrs.get("end")
+        start = self._ensure_awareness(attrs.get("start"))
+        end = self._ensure_awareness(attrs.get("end"), reference=start)
 
-        if start and timezone.is_naive(start):
-            attrs["start"] = timezone.make_aware(start, timezone.get_current_timezone())
-            start = attrs["start"]
-
-        if end and timezone.is_naive(end):
-            attrs["end"] = timezone.make_aware(end, start.tzinfo if start else timezone.get_current_timezone())
-            end = attrs["end"]
+        if start:
+            attrs["start"] = start
+        if end:
+            attrs["end"] = end
 
         if start and end and end < start:
-            raise serializers.ValidationError({"end": "End must be greater or equal to Start"})
+            raise serializers.ValidationError({"end": "End must be greater or equal to start."})
 
-        frequency = attrs.get("recurrence_frequency", getattr(self.instance, "recurrence_frequency", Event.RecurrenceFrequency.NONE))
-        interval = attrs.get("recurrence_interval", getattr(self.instance, "recurrence_interval", 1))
-        count = attrs.get("recurrence_count", getattr(self.instance, "recurrence_count", None))
-        end_date = attrs.get("recurrence_end_date", getattr(self.instance, "recurrence_end_date", None))
+        frequency = attrs.get(
+            "recurrence_frequency",
+            getattr(self.instance, "recurrence_frequency", Event.RecurrenceFrequency.NONE),
+        )
+        interval = attrs.get(
+            "recurrence_interval",
+            getattr(self.instance, "recurrence_interval", 1),
+        )
+        count = attrs.get(
+            "recurrence_count",
+            getattr(self.instance, "recurrence_count", None),
+        )
+        end_date = attrs.get(
+            "recurrence_end_date",
+            getattr(self.instance, "recurrence_end_date", None),
+        )
 
         if interval and interval < 1:
             raise serializers.ValidationError({"recurrence_interval": "Interval must be at least 1."})
@@ -91,6 +114,15 @@ class EventSerializer(serializers.ModelSerializer):
             attrs["recurrence_end_date"] = None
 
         return attrs
+
+    @staticmethod
+    def _ensure_awareness(value, reference: datetime | None = None):
+        if not value:
+            return value
+        if timezone.is_naive(value):
+            tz = reference.tzinfo if reference else timezone.get_current_timezone()
+            return timezone.make_aware(value, tz)
+        return value
 
 
 class EventOccurrenceSerializer(serializers.Serializer):
