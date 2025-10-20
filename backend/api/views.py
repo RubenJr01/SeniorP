@@ -24,13 +24,15 @@ from .google_calendar import (
     revoke_google_account,
     run_two_way_sync,
 )
-from .models import Event, GoogleAccount, BrightspaceFeed
+from .models import Event, GoogleAccount, BrightspaceFeed, Notification
 from .serializers import (
     UserSerializer,
     EventSerializer,
     EventOccurrenceSerializer,
     BrightspaceImportSerializer,
+    NotificationSerializer,
 )
+from .notifications import create_notification
 
 class CreateUserView(generics.CreateAPIView):
     queryset = User.objects.all()
@@ -50,7 +52,35 @@ class EventViewSet(viewsets.ModelViewSet):
         return self.queryset.filter(pilot=self.request.user)
 
     def perform_create(self, serializer):
-        serializer.save(pilot=self.request.user)
+        event = serializer.save(pilot=self.request.user)
+        create_notification(
+            user=self.request.user,
+            type=Notification.Type.EVENT_CREATED,
+            title=f"Mission scheduled: {event.title}",
+            message=f"Mission starts {event.start.isoformat()}.",
+            data={
+                "event_id": event.pk,
+                "action": "created",
+                "start": event.start.isoformat(),
+            },
+            event=event,
+        )
+
+    def perform_update(self, serializer):
+        event = serializer.save()
+        create_notification(
+            user=self.request.user,
+            type=Notification.Type.EVENT_UPDATED,
+            title=f"Mission updated: {event.title}",
+            message=f"Latest schedule {event.start.isoformat()} - {event.end.isoformat()}.",
+            data={
+                "event_id": event.pk,
+                "action": "updated",
+                "start": event.start.isoformat(),
+                "end": event.end.isoformat(),
+            },
+            event=event,
+        )
 
     def perform_destroy(self, instance):
         account = None
@@ -66,7 +96,22 @@ class EventViewSet(viewsets.ModelViewSet):
                 # If Google deletion fails, fall back to local delete so the app stays responsive.
                 pass
 
+        payload = {
+            "event_id": instance.pk,
+            "action": "deleted",
+            "start": instance.start.isoformat() if instance.start else None,
+            "end": instance.end.isoformat() if instance.end else None,
+            "source": instance.source,
+        }
+        title = instance.title
         instance.delete()
+        create_notification(
+            user=self.request.user,
+            type=Notification.Type.EVENT_DELETED,
+            title=f"Mission removed: {title}",
+            message="Mission has been removed from the board.",
+            data=payload,
+        )
 
 
 class EventOccurrencesView(APIView):
@@ -188,165 +233,184 @@ class EventOccurrencesView(APIView):
 
 
 class BrightspaceImportView(APIView):
-    permission_classes = [IsAuthenticated]
+  permission_classes = [IsAuthenticated]
 
-    @staticmethod
-    def _normalize_datetime(value):
-        if isinstance(value, datetime):
-            if timezone.is_naive(value):
-                value = timezone.make_aware(value, timezone.get_current_timezone())
-            return value
-        if isinstance(value, date):
-            naive = datetime.combine(value, time.min)
-            return timezone.make_aware(naive, timezone.get_current_timezone())
-        return None
+  def get(self, request):
+    try:
+      feed = request.user.brightspace_feed
+    except BrightspaceFeed.DoesNotExist:
+      return Response({"connected": False})
 
-    def post(self, request):
-        serializer = BrightspaceImportSerializer(data=request.data)
-        serializer.is_valid(raise_exception=True)
-        provided_url = serializer.validated_data.get("ics_url", "").strip()
+    data = {
+      "connected": True,
+      "ics_url": feed.ics_url,
+      "last_imported_at": feed.last_imported_at,
+    }
+    return Response(data)
 
+  @staticmethod
+  def _normalize_datetime(value):
+    if isinstance(value, datetime):
+      if timezone.is_naive(value):
+        value = timezone.make_aware(value, timezone.get_current_timezone())
+      return value
+    if isinstance(value, date):
+      naive = datetime.combine(value, time.min)
+      return timezone.make_aware(naive, timezone.get_current_timezone())
+    return None
+
+  def post(self, request):
+    serializer = BrightspaceImportSerializer(data=request.data)
+    serializer.is_valid(raise_exception=True)
+    provided_url = serializer.validated_data.get("ics_url", "").strip()
+
+    feed_instance = None
+    if provided_url:
+      feed_instance, _ = BrightspaceFeed.objects.update_or_create(
+        user=request.user,
+        defaults={"ics_url": provided_url},
+      )
+      ics_url = provided_url
+    else:
+      try:
+        feed_instance = request.user.brightspace_feed
+      except BrightspaceFeed.DoesNotExist:
         feed_instance = None
-        if provided_url:
-            feed_instance, _ = BrightspaceFeed.objects.update_or_create(
-                user=request.user,
-                defaults={"ics_url": provided_url},
-            )
-            ics_url = provided_url
-        else:
-            try:
-                feed_instance = request.user.brightspace_feed
-            except BrightspaceFeed.DoesNotExist:
-                feed_instance = None
-            if not feed_instance or not feed_instance.ics_url:
-                return Response(
-                    {"detail": "No saved Brightspace feed found. Please paste your iCal URL."},
-                    status=status.HTTP_400_BAD_REQUEST,
-                )
-            ics_url = feed_instance.ics_url
-
-        try:
-            response = requests.get(ics_url, timeout=15)
-            response.raise_for_status()
-        except requests.RequestException as exc:
-            return Response(
-                {"detail": f"Failed to download ICS feed: {exc}"},
-                status=status.HTTP_400_BAD_REQUEST,
-            )
-
-        try:
-            calendar = Calendar.from_ical(response.content)
-        except ValueError:
-            return Response(
-                {"detail": "The provided ICS feed is not valid."},
-                status=status.HTTP_400_BAD_REQUEST,
-            )
-
-        created = 0
-        updated = 0
-        skipped = 0
-
-        for component in calendar.walk("vevent"):
-            dtstart_prop = component.get("dtstart")
-            if dtstart_prop is None:
-                skipped += 1
-                continue
-
-            uid = str(component.get("uid", "")).strip()
-            if not uid:
-                skipped += 1
-                continue
-
-            summary = component.get("summary")
-            description = component.get("description")
-            location = component.get("location")
-            dtend_prop = component.get("dtend")
-            duration_prop = component.get("duration")
-
-            dtstart_raw = dtstart_prop.dt
-            dtend_raw = dtend_prop.dt if dtend_prop else None
-            duration_value = duration_prop.dt if duration_prop else None
-
-            is_all_day = isinstance(dtstart_raw, date) and not isinstance(dtstart_raw, datetime)
-
-            start_dt = self._normalize_datetime(dtstart_raw)
-            if start_dt is None:
-                skipped += 1
-                continue
-
-            if dtend_raw is not None:
-                end_dt = self._normalize_datetime(dtend_raw)
-                if end_dt is not None and is_all_day:
-                    end_dt = end_dt - timedelta(seconds=1)
-            elif isinstance(duration_value, timedelta):
-                end_dt = start_dt + duration_value
-            else:
-                end_dt = start_dt + (timedelta(days=1) if is_all_day else timedelta(hours=1))
-
-            if end_dt <= start_dt:
-                end_dt = start_dt + (timedelta(days=1) if is_all_day else timedelta(hours=1))
-
-            description_text = ""
-            if summary:
-                title = str(summary)
-            else:
-                title = "Brightspace event"
-            description_text = ""
-            if description:
-                raw_description = str(description)
-                description_clean = re.sub(r"https?://\S+", "", raw_description, flags=re.IGNORECASE)
-                description_text = description_clean.strip()
-            if location:
-                location_text = str(location)
-                if description_text:
-                    description_text = f"{description_text}\nLocation: {location_text}"
-                else:
-                    description_text = f"Location: {location_text}"
-
-            defaults = {
-                "title": title,
-                "description": description_text,
-                "start": start_dt,
-                "end": end_dt,
-                "all_day": is_all_day,
-                "source": Event.Source.BRIGHTSPACE,
-                "recurrence_frequency": Event.RecurrenceFrequency.NONE,
-                "recurrence_interval": 1,
-                "recurrence_count": None,
-                "recurrence_end_date": None,
-                "google_event_id": "",
-                "google_etag": "",
-                "google_ical_uid": uid,
-                "google_raw": {
-                    "source": "brightspace",
-                    "ics_url": ics_url,
-                },
-            }
-
-            event, event_created = Event.objects.update_or_create(
-                pilot=request.user,
-                google_ical_uid=uid,
-                defaults=defaults,
-            )
-            if event_created:
-                created += 1
-            else:
-                updated += 1
-
-        if feed_instance:
-            feed_instance.last_imported_at = timezone.now()
-            feed_instance.save(update_fields=["last_imported_at", "updated_at"])
-
+      if not feed_instance or not feed_instance.ics_url:
         return Response(
-            {
-                "created": created,
-                "updated": updated,
-                "skipped": skipped,
-                "saved_url": True,
-                "used_saved_url": not bool(provided_url),
-            },
-            status=status.HTTP_200_OK,
+          {"detail": "No saved Brightspace feed found. Please paste your iCal URL."},
+          status=status.HTTP_400_BAD_REQUEST,
         )
+      ics_url = feed_instance.ics_url
+
+    try:
+      response = requests.get(ics_url, timeout=15)
+      response.raise_for_status()
+    except requests.RequestException as exc:
+      return Response(
+        {"detail": f"Failed to download ICS feed: {exc}"},
+        status=status.HTTP_400_BAD_REQUEST,
+      )
+
+    try:
+      calendar = Calendar.from_ical(response.content)
+    except ValueError:
+      return Response(
+        {"detail": "The provided ICS feed is not valid."},
+        status=status.HTTP_400_BAD_REQUEST,
+      )
+
+    created = 0
+    updated = 0
+    skipped = 0
+
+    for component in calendar.walk("vevent"):
+      dtstart_prop = component.get("dtstart")
+      if dtstart_prop is None:
+        skipped += 1
+        continue
+
+      uid = str(component.get("uid", "")).strip()
+      if not uid:
+        skipped += 1
+        continue
+
+      summary = component.get("summary")
+      description = component.get("description")
+      location = component.get("location")
+      dtend_prop = component.get("dtend")
+      duration_prop = component.get("duration")
+
+      dtstart_raw = dtstart_prop.dt
+      dtend_raw = dtend_prop.dt if dtend_prop else None
+      duration_value = duration_prop.dt if duration_prop else None
+
+      is_all_day = isinstance(dtstart_raw, date) and not isinstance(dtstart_raw, datetime)
+
+      start_dt = self._normalize_datetime(dtstart_raw)
+      if start_dt is None:
+        skipped += 1
+        continue
+
+      if dtend_raw is not None:
+        end_dt = self._normalize_datetime(dtend_raw)
+        if end_dt is not None and is_all_day:
+          end_dt = end_dt - timedelta(seconds=1)
+      elif isinstance(duration_value, timedelta):
+        end_dt = start_dt + duration_value
+      else:
+        end_dt = start_dt + (timedelta(days=1) if is_all_day else timedelta(hours=1))
+
+      if end_dt <= start_dt:
+        end_dt = start_dt + (timedelta(days=1) if is_all_day else timedelta(hours=1))
+
+      description_text = ""
+      if summary:
+        title = str(summary)
+      else:
+        title = "Brightspace event"
+      if description:
+        raw_description = str(description)
+        description_clean = re.sub(r"https?://\S+", "", raw_description, flags=re.IGNORECASE)
+        description_text = description_clean.strip()
+      if location:
+        location_text = str(location)
+        if description_text:
+          description_text = f"{description_text}\nLocation: {location_text}"
+        else:
+          description_text = f"Location: {location_text}"
+
+      defaults = {
+        "title": title,
+        "description": description_text,
+        "start": start_dt,
+        "end": end_dt,
+        "all_day": is_all_day,
+        "source": Event.Source.BRIGHTSPACE,
+        "recurrence_frequency": Event.RecurrenceFrequency.NONE,
+        "recurrence_interval": 1,
+        "recurrence_count": None,
+        "recurrence_end_date": None,
+        "google_event_id": "",
+        "google_etag": "",
+        "google_ical_uid": uid,
+        "google_raw": {
+          "source": "brightspace",
+          "ics_url": ics_url,
+        },
+      }
+
+      event, event_created = Event.objects.update_or_create(
+        pilot=request.user,
+        google_ical_uid=uid,
+        defaults=defaults,
+      )
+      if event_created:
+        created += 1
+      else:
+        updated += 1
+
+    if feed_instance:
+      feed_instance.last_imported_at = timezone.now()
+      feed_instance.save(update_fields=["last_imported_at", "updated_at"])
+
+    summary = {
+      "created": created,
+      "updated": updated,
+      "skipped": skipped,
+      "saved_url": True,
+      "used_saved_url": not bool(provided_url),
+    }
+
+    create_notification(
+      user=request.user,
+      type=Notification.Type.BRIGHTSPACE_IMPORT,
+      title="Brightspace calendar import completed",
+      message=f"Imported {created} new and updated {updated} missions.",
+      data=summary,
+    )
+
+    return Response(summary, status=status.HTTP_200_OK)
 
 
 class GoogleStatusView(APIView):
@@ -400,6 +464,13 @@ class GoogleSyncView(APIView):
                 {"detail": str(exc)},
                 status=status.HTTP_502_BAD_GATEWAY,
             )
+        create_notification(
+            user=request.user,
+            type=Notification.Type.GOOGLE_SYNC,
+            title="Google Calendar sync completed",
+            message="Two-way sync with Google Calendar finished.",
+            data={"stats": stats},
+        )
         return Response({"stats": stats})
 
 
@@ -413,6 +484,13 @@ class GoogleDisconnectView(APIView):
             return Response(status=status.HTTP_204_NO_CONTENT)
 
         revoke_google_account(account)
+        create_notification(
+            user=request.user,
+            type=Notification.Type.GOOGLE_SYNC,
+            title="Google Calendar disconnected",
+            message="Google Calendar account has been disconnected.",
+            data={"action": "disconnect"},
+        )
         return Response(status=status.HTTP_204_NO_CONTENT)
 
 
@@ -440,6 +518,14 @@ class GoogleOAuthCallbackView(APIView):
             params = {"google_status": "error", "message": str(exc) or "oauth_failed"}
             return HttpResponseRedirect(f"{redirect_base}?{urlencode(params)}")
 
+        create_notification(
+            user=account.user,
+            type=Notification.Type.GOOGLE_SYNC,
+            title="Google Calendar connected",
+            message="Google Calendar account connected and initial sync complete.",
+            data={"stats": stats, "action": "connect"},
+        )
+
         summary = {
             "google_status": "success",
             "imported": stats.get("created", 0),
@@ -448,3 +534,36 @@ class GoogleOAuthCallbackView(APIView):
         }
         encoded = urlencode({k: v for k, v in summary.items() if k == "google_status" or v})
         return HttpResponseRedirect(f"{redirect_base}?{encoded}")
+
+
+class NotificationListView(APIView):
+    permission_classes = [IsAuthenticated]
+
+    def get(self, request):
+        limit_param = request.query_params.get("limit")
+        try:
+            limit = int(limit_param) if limit_param is not None else 20
+        except (TypeError, ValueError):
+            limit = 20
+        limit = max(1, min(limit, 100))
+
+        base_queryset = Notification.objects.filter(user=request.user)
+        notifications = base_queryset.order_by("-created_at")[:limit]
+        serializer = NotificationSerializer(notifications, many=True)
+        unread_count = base_queryset.filter(read_at__isnull=True).count()
+        return Response({
+            "results": serializer.data,
+            "unread_count": unread_count,
+        })
+
+    def post(self, request):
+        ids = request.data.get("ids") or []
+        mark_all = bool(request.data.get("all"))
+        queryset = Notification.objects.filter(user=request.user, read_at__isnull=True)
+        if not mark_all:
+            if not isinstance(ids, list):
+                return Response({"detail": "ids must be a list."}, status=status.HTTP_400_BAD_REQUEST)
+            queryset = queryset.filter(pk__in=ids)
+
+        updated = queryset.update(read_at=timezone.now())
+        return Response({"updated": updated})

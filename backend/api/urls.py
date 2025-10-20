@@ -9,6 +9,7 @@ from .views import (
     GoogleOAuthStartView,
     GoogleStatusView,
     GoogleSyncView,
+    NotificationListView,
 )
 
 router = DefaultRouter()
@@ -23,4 +24,5 @@ urlpatterns = [
     path("google/oauth/callback/", GoogleOAuthCallbackView.as_view(), name="google-oauth-callback"),
     path("google/sync/", GoogleSyncView.as_view(), name="google-sync"),
     path("google/disconnect/", GoogleDisconnectView.as_view(), name="google-disconnect"),
+    path("notifications/", NotificationListView.as_view(), name="notifications"),
 ]

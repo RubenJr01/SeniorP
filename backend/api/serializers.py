@@ -1,7 +1,7 @@
 from django.contrib.auth.models import User
 from django.utils import timezone
 from rest_framework import serializers
-from .models import Event
+from .models import Event, Notification
 
 class UserSerializer(serializers.ModelSerializer):
     # Register a new user with a hashed password
@@ -109,3 +109,21 @@ class EventOccurrenceSerializer(serializers.Serializer):
 
 class BrightspaceImportSerializer(serializers.Serializer):
     ics_url = serializers.URLField(required=False, allow_blank=True)
+
+
+class NotificationSerializer(serializers.ModelSerializer):
+    event = serializers.PrimaryKeyRelatedField(read_only=True)
+
+    class Meta:
+        model = Notification
+        fields = (
+            "id",
+            "type",
+            "title",
+            "message",
+            "data",
+            "event",
+            "read_at",
+            "created_at",
+        )
+        read_only_fields = fields

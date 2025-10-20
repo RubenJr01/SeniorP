@@ -15,3 +15,5 @@ google-auth-oauthlib
 python-dateutil
 icalendar
 requests
+celery[redis]
+redis

@@ -143,3 +143,37 @@ class BrightspaceFeed(models.Model):
   def __str__(self):
     return f"{self.user.username} Brightspace feed"
 
+
+class Notification(models.Model):
+  class Type(models.TextChoices):
+    EVENT_CREATED = "event_created", "Mission created"
+    EVENT_UPDATED = "event_updated", "Mission updated"
+    EVENT_DELETED = "event_deleted", "Mission deleted"
+    GOOGLE_SYNC = "google_sync", "Google Calendar sync"
+    BRIGHTSPACE_IMPORT = "brightspace_import", "Brightspace import"
+
+  user = models.ForeignKey(
+    User,
+    on_delete=models.CASCADE,
+    related_name="notifications",
+  )
+  event = models.ForeignKey(
+    Event,
+    on_delete=models.CASCADE,
+    related_name="notifications",
+    null=True,
+    blank=True,
+  )
+  type = models.CharField(max_length=50, choices=Type.choices)
+  title = models.CharField(max_length=255)
+  message = models.TextField(blank=True)
+  data = models.JSONField(default=dict, blank=True)
+  read_at = models.DateTimeField(null=True, blank=True)
+  created_at = models.DateTimeField(auto_now_add=True)
+  updated_at = models.DateTimeField(auto_now=True)
+
+  def __str__(self):
+    return f"Notification({self.user.username}, {self.type})"
+
+  class Meta:
+    ordering = ["-created_at"]

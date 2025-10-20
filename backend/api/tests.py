@@ -8,7 +8,7 @@ from rest_framework import status
 from rest_framework.test import APITestCase
 from unittest.mock import patch
 
-from .models import Event, GoogleAccount
+from .models import Event, GoogleAccount, Notification, BrightspaceFeed
 
 
 class EventAPITests(APITestCase):
@@ -66,6 +66,50 @@ class EventAPITests(APITestCase):
         event = Event.objects.get(pk=created_id)
         self.assertEqual(event.pilot, self.user)
         self.assertFalse(event.all_day)
+        notification = Notification.objects.filter(user=self.user).latest("created_at")
+        self.assertEqual(notification.type, Notification.Type.EVENT_CREATED)
+        self.assertEqual(notification.data.get("event_id"), event.pk)
+
+    def test_notifications_mark_read(self):
+        self.authenticate(self.user)
+        notification = Notification.objects.create(
+            user=self.user,
+            type=Notification.Type.EVENT_CREATED,
+            title="Test",
+            message="",
+            data={"event_id": 1},
+        )
+
+        url = reverse("notifications")
+        response = self.client.get(url)
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        self.assertEqual(response.data["unread_count"], 1)
+
+        mark_resp = self.client.post(url, {"ids": [notification.pk]}, format="json")
+        self.assertEqual(mark_resp.status_code, status.HTTP_200_OK)
+        notification.refresh_from_db()
+        self.assertIsNotNone(notification.read_at)
+
+
+    def test_brightspace_status_connected(self):
+        self.authenticate(self.user)
+        BrightspaceFeed.objects.create(user=self.user, ics_url="https://example.com/feed.ics")
+
+        url = reverse("calendar-brightspace-import")
+        response = self.client.get(url)
+
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        self.assertTrue(response.data["connected"])
+        self.assertEqual(response.data["ics_url"], "https://example.com/feed.ics")
+
+    def test_brightspace_status_not_connected(self):
+        self.authenticate(self.user)
+        url = reverse("calendar-brightspace-import")
+        response = self.client.get(url)
+
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        self.assertFalse(response.data["connected"])
+
 
     def test_delete_event_removes_google_record(self):
         self.authenticate(self.user)
