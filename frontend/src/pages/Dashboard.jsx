@@ -21,6 +21,17 @@ function formatRecurrenceLabel(frequency, interval) {
   return `Repeats every ${interval} ${unit}${interval > 1 ? "s" : ""}`;
 }
 
+const RSVP_STATUS_LABELS = {
+  needsAction: "Awaiting response",
+  accepted: "Accepted",
+  declined: "Declined",
+  tentative: "Tentative",
+};
+
+const RSVP_ACTIONS = ["accepted", "tentative", "declined"];
+
+const getRsvpLabel = (status) => RSVP_STATUS_LABELS[status] || status;
+
 export default function Dashboard() {
   const location = useLocation();
   const [events, setEvents] = useState([]);
@@ -33,6 +44,8 @@ export default function Dashboard() {
   const [brightspaceLinked, setBrightspaceLinked] = useState(false);
   const [brightspaceWorking, setBrightspaceWorking] = useState(false);
   const [brightspaceMessage, setBrightspaceMessage] = useState("");
+  const [rsvpWorking, setRsvpWorking] = useState(null);
+  const [rsvpMessage, setRsvpMessage] = useState(null);
 
   const fetchOccurrences = useCallback(async () => {
     try {
@@ -231,6 +244,33 @@ export default function Dashboard() {
       setBrightspaceWorking(false);
     }
   }, [brightspaceWorking, fetchOccurrences]);
+
+  const handleRsvp = useCallback(
+    async (eventId, response) => {
+      setRsvpWorking({ eventId, response });
+      setRsvpMessage(null);
+      try {
+        await api.post(`/api/events/${eventId}/rsvp/`, { response });
+        setRsvpMessage({
+          type: "success",
+          text:
+            response === "declined"
+              ? "Invitation declined."
+              : `RSVP updated: ${getRsvpLabel(response)}.`,
+        });
+        await fetchOccurrences();
+      } catch (err) {
+        const detail = err.response?.data?.detail;
+        setRsvpMessage({
+          type: "error",
+          text: detail || "Unable to update RSVP. Please try again.",
+        });
+      } finally {
+        setRsvpWorking(null);
+      }
+    },
+    [fetchOccurrences],
+  );
 
   const disconnectGoogle = useCallback(async () => {
     setGoogleWorking(true);
@@ -450,6 +490,11 @@ export default function Dashboard() {
                 <p>{!loading && hasEvents ? eventCountLabel : "Chronological view of your activity."}</p>
               </div>
             </div>
+            {rsvpMessage && (
+              <p className={`dashboard-banner dashboard-banner--${rsvpMessage.type}`}>
+                {rsvpMessage.text}
+              </p>
+            )}
             {fetchError && <p className="dashboard-error">{fetchError}</p>}
             {loading ? (
               <p className="dashboard-muted">Loading...</p>
@@ -460,68 +505,143 @@ export default function Dashboard() {
               </div>
             ) : (
               <ul className="dashboard-event-list">
-                {groupedEvents.map((ev) => (
-                  <li className="dashboard-event" key={ev.event_id}>
-                    <div className="dashboard-event-timeline">
-                      <span className="dashboard-event-date">
-                        {new Date(ev.start).toLocaleDateString()}
-                      </span>
-                      <span className="dashboard-event-time">
-                        {new Date(ev.start).toLocaleTimeString([], {
-                          hour: "2-digit",
-                          minute: "2-digit",
-                        })}{" "}
-                        -{" "}
-                        {new Date(ev.end).toLocaleTimeString([], {
-                          hour: "2-digit",
-                          minute: "2-digit",
-                        })}
-                      </span>
-                    </div>
-                    <div className="dashboard-event-content">
-                      <div className="dashboard-event-header">
-                        <strong>{ev.title}</strong>
-                        {ev.source !== "local" && (
-                          <span
-                            className={`dashboard-tag ${
-                              ev.source === "google"
-                                ? "dashboard-tag--google"
-                                : ev.source === "brightspace"
-                                ? "dashboard-tag--brightspace"
-                                : "dashboard-tag--sync"
-                            }`}
-                          >
-                            {ev.source === "google"
-                              ? "Google"
-                              : ev.source === "brightspace"
-                              ? "Brightspace"
-                              : "Synced"}
-                          </span>
-                        )}
-                        {ev.is_recurring && (
-                          <span className="dashboard-tag dashboard-tag--recurring">
-                            {formatRecurrenceLabel(ev.recurrence_frequency, ev.recurrence_interval)}
-                          </span>
-                        )}
-                        {ev.all_day && (
-                          <span className="dashboard-tag dashboard-tag--muted">
-                            All day
-                          </span>
-                        )}
+                {groupedEvents.map((ev) => {
+                  const isRsvpUpdating =
+                    rsvpWorking && rsvpWorking.eventId === ev.event_id;
+                  const attendeeSummary =
+                    ev.attendees && ev.attendees.length > 0
+                      ? ev.attendees
+                          .map((attendee) => {
+                            const label = attendee.display_name || attendee.email;
+                            if (attendee.is_self) {
+                              const statusLabel = attendee.response_status
+                                ? getRsvpLabel(attendee.response_status).toLowerCase()
+                                : "";
+                              return statusLabel
+                                ? `${label} (you, ${statusLabel})`
+                                : `${label} (you)`;
+                            }
+                            if (
+                              attendee.response_status &&
+                              attendee.response_status !== "needsAction"
+                            ) {
+                              return `${label} (${getRsvpLabel(attendee.response_status).toLowerCase()})`;
+                            }
+                            return label;
+                          })
+                          .join(", ")
+                      : "";
+
+                  return (
+                    <li className="dashboard-event" key={ev.event_id}>
+                      <div className="dashboard-event-timeline">
+                        <span className="dashboard-event-date">
+                          {new Date(ev.start).toLocaleDateString()}
+                        </span>
+                        <span className="dashboard-event-time">
+                          {new Date(ev.start).toLocaleTimeString([], {
+                            hour: "2-digit",
+                            minute: "2-digit",
+                          })}{" "}
+                          -{" "}
+                          {new Date(ev.end).toLocaleTimeString([], {
+                            hour: "2-digit",
+                            minute: "2-digit",
+                          })}
+                        </span>
                       </div>
-                      {ev.description && (
-                        <p className="dashboard-event-desc">{ev.description}</p>
-                      )}
-                    </div>
-                    <button
-                      type="button"
-                      className="dashboard-button dashboard-button--ghost"
-                      onClick={() => onDelete(ev.event_id, ev.is_recurring)}
-                    >
-                      Delete
-                    </button>
-                  </li>
-                ))}
+                      <div className="dashboard-event-content">
+                        <div className="dashboard-event-header">
+                          <strong>{ev.title}</strong>
+                          {ev.source !== "local" && (
+                            <span
+                              className={`dashboard-tag ${
+                                ev.source === "google"
+                                  ? "dashboard-tag--google"
+                                  : ev.source === "brightspace"
+                                  ? "dashboard-tag--brightspace"
+                                  : "dashboard-tag--sync"
+                              }`}
+                            >
+                              {ev.source === "google"
+                                ? "Google"
+                                : ev.source === "brightspace"
+                                ? "Brightspace"
+                                : "Synced"}
+                            </span>
+                          )}
+                          {ev.is_recurring && (
+                            <span className="dashboard-tag dashboard-tag--recurring">
+                              {formatRecurrenceLabel(ev.recurrence_frequency, ev.recurrence_interval)}
+                            </span>
+                          )}
+                          {ev.all_day && (
+                            <span className="dashboard-tag dashboard-tag--muted">
+                              All day
+                            </span>
+                          )}
+                          {ev.can_rsvp && ev.self_response_status && (
+                            <span
+                              className={`dashboard-tag dashboard-tag--rsvp dashboard-tag--rsvp-${ev.self_response_status}`}
+                            >
+                              {getRsvpLabel(ev.self_response_status)}
+                            </span>
+                          )}
+                        </div>
+                        {ev.description && (
+                          <p className="dashboard-event-desc">{ev.description}</p>
+                        )}
+                        {attendeeSummary && (
+                          <p className="dashboard-event-attendees">{attendeeSummary}</p>
+                        )}
+                        <div className="dashboard-event-actions">
+                          {ev.can_rsvp && (
+                            <div className="dashboard-event-rsvp">
+                              <span className="dashboard-event-rsvp-label">
+                                {ev.self_response_status === "needsAction"
+                                  ? "Awaiting your response"
+                                  : `You responded: ${getRsvpLabel(ev.self_response_status)}`}
+                              </span>
+                              <div className="dashboard-event-rsvp-buttons">
+                                {RSVP_ACTIONS.map((action) => {
+                                  const isActive = ev.self_response_status === action;
+                                  const buttonLabel =
+                                    action === "accepted"
+                                      ? "Accept"
+                                      : action === "tentative"
+                                      ? "Maybe"
+                                      : "Decline";
+                                  const isSaving =
+                                    isRsvpUpdating && rsvpWorking?.response === action;
+                                  return (
+                                    <button
+                                      key={action}
+                                      type="button"
+                                      className={`dashboard-event-rsvp-button${
+                                        isActive ? " dashboard-event-rsvp-button--active" : ""
+                                      }`}
+                                      onClick={() => handleRsvp(ev.event_id, action)}
+                                      disabled={isRsvpUpdating}
+                                    >
+                                      {isSaving ? "Saving..." : buttonLabel}
+                                    </button>
+                                  );
+                                })}
+                              </div>
+                            </div>
+                          )}
+                          <button
+                            type="button"
+                            className="dashboard-button dashboard-button--ghost"
+                            onClick={() => onDelete(ev.event_id, ev.is_recurring)}
+                          >
+                            Delete
+                          </button>
+                        </div>
+                      </div>
+                    </li>
+                  );
+                })}
               </ul>
             )}
           </section>

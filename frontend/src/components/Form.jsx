@@ -1,12 +1,24 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import api from "../api";
 import { useNavigate } from "react-router-dom";
 import { ACCESS_TOKEN, REFRESH_TOKEN } from "../constants";
 import "../styles/Form.css";
 
-function Form({ route, method, title, subtitle, submitLabel, footer }) {
+function Form({
+  route,
+  method,
+  title,
+  subtitle,
+  submitLabel,
+  footer,
+  initialEmail = "",
+  inviteToken = "",
+  emailLocked = false,
+  disabled = false,
+}) {
   const [username, setUsername] = useState("");
   const [password, setPassword] = useState("");
+  const [email, setEmail] = useState(initialEmail || "");
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
   const navigate = useNavigate();
@@ -16,13 +28,30 @@ function Form({ route, method, title, subtitle, submitLabel, footer }) {
   const buttonText = submitLabel ?? (isLogin ? "Continue" : "Create account");
   const eyebrow = isLogin ? "Mission control access" : "Crew onboarding";
 
+  useEffect(() => {
+    setEmail(initialEmail || "");
+  }, [initialEmail]);
+
   const handleSubmit = async (e) => {
     e.preventDefault();
+    if (disabled) {
+      return;
+    }
     setLoading(true);
     setError("");
 
     try {
-      const resp = await api.post(route, { username, password });
+      const payload = { username, password };
+      if (!isLogin) {
+        if (email) {
+          payload.email = email;
+        }
+        if (inviteToken) {
+          payload.invite_token = inviteToken;
+        }
+      }
+
+      const resp = await api.post(route, payload);
       if (isLogin) {
         localStorage.setItem(ACCESS_TOKEN, resp.data.access);
         localStorage.setItem(REFRESH_TOKEN, resp.data.refresh);
@@ -62,10 +91,26 @@ function Form({ route, method, title, subtitle, submitLabel, footer }) {
             onChange={(event) => setUsername(event.target.value)}
             placeholder="Enter your username"
             autoComplete="username"
-            disabled={loading}
+            disabled={loading || disabled}
             required
           />
         </label>
+
+        {!isLogin && (
+          <label className="form-field">
+            <span className="form-label">Email</span>
+            <input
+              className="form-input"
+              type="email"
+              value={email}
+              onChange={(event) => setEmail(event.target.value)}
+              placeholder="Enter your email"
+              autoComplete="email"
+              disabled={loading || disabled || emailLocked}
+              required={Boolean(inviteToken)}
+            />
+          </label>
+        )}
 
         <label className="form-field">
           <span className="form-label">Password</span>
@@ -76,13 +121,13 @@ function Form({ route, method, title, subtitle, submitLabel, footer }) {
             onChange={(event) => setPassword(event.target.value)}
             placeholder="Enter your password"
             autoComplete={isLogin ? "current-password" : "new-password"}
-            disabled={loading}
+            disabled={loading || disabled}
             required
           />
         </label>
       </div>
 
-      <button className="form-button" type="submit" disabled={loading}>
+      <button className="form-button" type="submit" disabled={loading || disabled}>
         {loading ? "Processing..." : buttonText}
       </button>
 

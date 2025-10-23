@@ -121,6 +121,10 @@
   color: var(--text-secondary);
 }
 
+.auth-muted--warning {
+  color: #e11d48;
+}
+
 @media (max-width: 960px) {
   .auth-shell {
     grid-template-columns: 1fr;

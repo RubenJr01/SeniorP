@@ -17,7 +17,7 @@ from googleapiclient.discovery import build
 from googleapiclient.errors import HttpError
 from google_auth_oauthlib.flow import Flow
 
-from .models import Event, GoogleAccount
+from .models import Event, EventAttendee, GoogleAccount
 
 UTC = dt_timezone.utc
 
@@ -197,6 +197,71 @@ def _event_defaults_from_google(google_event: Dict) -> Dict:
   }
 
 
+def _normalize_attendee_status(value: Optional[str]) -> str:
+  if not value:
+    return EventAttendee.ResponseStatus.NEEDS_ACTION
+  value = value.strip()
+  if value in EventAttendee.ResponseStatus.values:
+    return value
+  return EventAttendee.ResponseStatus.NEEDS_ACTION
+
+
+def _attendees_payload_for_google(event: Event) -> list:
+  payload = []
+  for attendee in event.attendees.all():
+    entry = {"email": attendee.email}
+    if attendee.display_name:
+      entry["displayName"] = attendee.display_name
+    if attendee.optional:
+      entry["optional"] = True
+    if attendee.response_status:
+      entry["responseStatus"] = _normalize_attendee_status(attendee.response_status)
+    payload.append(entry)
+  return payload
+
+
+def sync_attendees_from_google(
+  event: Event,
+  google_event: Dict,
+  account: Optional[GoogleAccount] = None,
+) -> None:
+  attendees = google_event.get("attendees") or []
+  seen = set()
+  account_email = None
+  if account and account.email:
+    account_email = account.email.strip().lower()
+
+  for attendee in attendees:
+    email = (attendee.get("email") or "").strip().lower()
+    if not email:
+      continue
+
+    status = _normalize_attendee_status(attendee.get("responseStatus"))
+    is_self = bool(attendee.get("self"))
+    if not is_self and account_email and email == account_email:
+      is_self = True
+
+    defaults = {
+      "display_name": attendee.get("displayName", ""),
+      "optional": attendee.get("optional", False),
+      "is_organizer": attendee.get("organizer", False),
+      "is_self": is_self,
+      "response_status": status,
+      "raw": attendee,
+    }
+    EventAttendee.objects.update_or_create(
+      event=event,
+      email=email,
+      defaults=defaults,
+    )
+    seen.add(email)
+
+  if seen:
+    EventAttendee.objects.filter(event=event).exclude(email__in=seen).delete()
+  else:
+    EventAttendee.objects.filter(event=event).delete()
+
+
 @transaction.atomic
 def apply_google_event(account: GoogleAccount, google_event: Dict) -> Tuple[str, Optional[Event]]:
   user = account.user
@@ -227,6 +292,7 @@ def apply_google_event(account: GoogleAccount, google_event: Dict) -> Tuple[str,
       setattr(event, field, value)
     event.source = Event.Source.SYNCED
     event.save()
+    sync_attendees_from_google(event, google_event, account)
     return "updated", event
 
   event = Event.objects.create(
@@ -234,6 +300,7 @@ def apply_google_event(account: GoogleAccount, google_event: Dict) -> Tuple[str,
     source=Event.Source.GOOGLE,
     **defaults,
   )
+  sync_attendees_from_google(event, google_event, account)
   return "created", event
 
 
@@ -297,6 +364,9 @@ def _event_body_for_google(event: Event) -> Dict:
   else:
     body["start"] = _render_google_datetime(event.start, False)
     body["end"] = _render_google_datetime(event.end, False)
+  attendees_payload = _attendees_payload_for_google(event)
+  if attendees_payload:
+    body["attendees"] = attendees_payload
   return body
 
 
@@ -323,6 +393,7 @@ def push_event_to_google(account: GoogleAccount, event: Event) -> Event:
     setattr(event, field, value)
   event.source = Event.Source.SYNCED
   event.save()
+  sync_attendees_from_google(event, updated, account)
   return event
 
 
@@ -369,6 +440,7 @@ def merge_existing_events(account: GoogleAccount) -> Dict[str, int]:
       continue
     g_event = matches.pop()
     index[key_for(local)] = matches
+    raw_copy = g_event.google_raw or {}
     transferred = {
       "google_event_id": g_event.google_event_id,
       "google_etag": g_event.google_etag,
@@ -381,6 +453,7 @@ def merge_existing_events(account: GoogleAccount) -> Dict[str, int]:
     for field, value in transferred.items():
       setattr(local, field, value)
     local.save()
+    sync_attendees_from_google(local, raw_copy, account)
     stats["linked_existing"] += 1
 
   # Second pass: dedupe entries where both a synced event (with our private property)
@@ -411,6 +484,7 @@ def merge_existing_events(account: GoogleAccount) -> Dict[str, int]:
     local = duplicates.first()
     old_google_id = local.google_event_id
     old_raw = local.google_raw
+    raw_copy = g_event.google_raw or {}
     transferred = {
       "google_event_id": g_event.google_event_id,
       "google_etag": g_event.google_etag,
@@ -423,6 +497,7 @@ def merge_existing_events(account: GoogleAccount) -> Dict[str, int]:
       setattr(local, field, value)
     local.source = Event.Source.SYNCED
     local.save()
+    sync_attendees_from_google(local, raw_copy, account)
     stats["deduped"] += 1
 
     private_before = old_raw.get("extendedProperties", {}).get("private", {})
@@ -439,6 +514,39 @@ def merge_existing_events(account: GoogleAccount) -> Dict[str, int]:
           raise GoogleSyncError(f"Failed to delete duplicate Google event: {exc}") from exc
 
   return stats
+
+
+def update_attendee_response(
+  account: GoogleAccount,
+  event: Event,
+  response_status: str,
+) -> Event:
+  if not event.google_event_id:
+    raise GoogleSyncError("Event is not linked to Google Calendar.")
+
+  service = build_service(account)
+  attendee_payload = {
+    "email": account.email,
+    "responseStatus": _normalize_attendee_status(response_status),
+  }
+
+  try:
+    updated = service.events().patch(
+      calendarId="primary",
+      eventId=event.google_event_id,
+      body={"attendees": [attendee_payload]},
+      sendUpdates="all",
+    ).execute()
+  except HttpError as exc:
+    raise GoogleSyncError(f"Failed to update invitation response: {exc}") from exc
+
+  defaults = _event_defaults_from_google(updated)
+  for field, value in defaults.items():
+    setattr(event, field, value)
+  event.source = Event.Source.SYNCED
+  event.save()
+  sync_attendees_from_google(event, updated, account)
+  return event
 
 
 def push_unsynced_events(account: GoogleAccount) -> int:

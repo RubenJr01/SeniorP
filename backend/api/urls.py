@@ -10,10 +10,13 @@ from .views import (
     GoogleStatusView,
     GoogleSyncView,
     NotificationListView,
+    InvitationViewSet,
+    InvitationLookupView,
 )
 
 router = DefaultRouter()
 router.register(r"events", EventViewSet, basename="event")
+router.register(r"invitations", InvitationViewSet, basename="invitation")
 
 urlpatterns = [
     path("events/occurrences/", EventOccurrencesView.as_view(), name="event-occurrences"),
@@ -25,4 +28,5 @@ urlpatterns = [
     path("google/sync/", GoogleSyncView.as_view(), name="google-sync"),
     path("google/disconnect/", GoogleDisconnectView.as_view(), name="google-disconnect"),
     path("notifications/", NotificationListView.as_view(), name="notifications"),
+    path("invitations/lookup/<uuid:token>/", InvitationLookupView.as_view(), name="invitation-lookup"),
 ]

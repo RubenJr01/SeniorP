@@ -10,6 +10,7 @@ from django.contrib.auth.models import User
 from django.http import HttpResponseRedirect
 from django.utils import timezone
 from rest_framework import generics, status, viewsets
+from rest_framework.decorators import action
 from rest_framework.permissions import AllowAny, IsAuthenticated
 from rest_framework.response import Response
 from rest_framework.views import APIView
@@ -23,16 +24,26 @@ from .google_calendar import (
     complete_oauth_flow,
     revoke_google_account,
     run_two_way_sync,
+    update_attendee_response,
 )
-from .models import Event, GoogleAccount, BrightspaceFeed, Notification
+from .models import (
+    Event,
+    EventAttendee,
+    GoogleAccount,
+    BrightspaceFeed,
+    Invitation,
+    Notification,
+)
 from .serializers import (
     UserSerializer,
     EventSerializer,
     EventOccurrenceSerializer,
     BrightspaceImportSerializer,
     NotificationSerializer,
+    InvitationSerializer,
 )
 from .notifications import create_notification
+from .invitations import send_invitation_email
 
 class CreateUserView(generics.CreateAPIView):
     queryset = User.objects.all()
@@ -44,7 +55,7 @@ class EventViewSet(viewsets.ModelViewSet):
     # /api/events/      GET, POST
     #
     # /api/events/{id}      GET, PUT, PATCH, DELETE
-    queryset = Event.objects.select_related("pilot").order_by("start")
+    queryset = Event.objects.select_related("pilot").prefetch_related("attendees").order_by("start")
     serializer_class = EventSerializer
     permission_classes = [IsAuthenticated]
 
@@ -81,6 +92,76 @@ class EventViewSet(viewsets.ModelViewSet):
             },
             event=event,
         )
+
+    @action(detail=True, methods=["post"])
+    def rsvp(self, request, pk=None):
+        event = self.get_object()
+        response_value = (request.data.get("response") or "").strip()
+        valid_responses = set(EventAttendee.ResponseStatus.values)
+        if response_value not in valid_responses:
+            return Response(
+                {"detail": "Invalid response choice."},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        try:
+            account = request.user.google_account
+        except GoogleAccount.DoesNotExist:
+            account = None
+
+        attendee_email = None
+        if account and account.email:
+            attendee_email = account.email.strip().lower()
+        elif request.user.email:
+            attendee_email = request.user.email.strip().lower()
+
+        if event.google_event_id:
+            if not account:
+                return Response(
+                    {"detail": "Connect Google Calendar to respond to this invitation."},
+                    status=status.HTTP_400_BAD_REQUEST,
+                )
+            try:
+                update_attendee_response(account, event, response_value)
+            except GoogleSyncError as exc:
+                return Response(
+                    {"detail": str(exc) or "Failed to update response on Google."},
+                    status=status.HTTP_502_BAD_GATEWAY,
+                )
+            event.refresh_from_db()
+        else:
+            if attendee_email:
+                attendee, _ = EventAttendee.objects.update_or_create(
+                    event=event,
+                    email=attendee_email,
+                    defaults={
+                        "response_status": response_value,
+                        "is_self": True,
+                        "raw": {},
+                    },
+                )
+            else:
+                attendee = EventAttendee.objects.filter(event=event, is_self=True).first()
+                if attendee:
+                    attendee.response_status = response_value
+                    attendee.save(update_fields=["response_status", "updated_at"])
+
+        if attendee_email:
+            attendee = EventAttendee.objects.filter(
+                event=event,
+                email=attendee_email,
+            ).first()
+            if attendee and not attendee.is_self:
+                attendee.is_self = True
+                attendee.save(update_fields=["is_self", "updated_at"])
+
+        hydrated = (
+            Event.objects.select_related("pilot")
+            .prefetch_related("attendees")
+            .get(pk=event.pk)
+        )
+        serializer = EventSerializer(hydrated, context=self.get_serializer_context())
+        return Response(serializer.data)
 
     def perform_destroy(self, instance):
         account = None
@@ -149,7 +230,11 @@ class EventOccurrencesView(APIView):
         if window_end > max_span:
             window_end = max_span
 
-        events = Event.objects.filter(pilot=request.user).order_by("start")
+        events = (
+            Event.objects.filter(pilot=request.user)
+            .prefetch_related("attendees")
+            .order_by("start")
+        )
         occurrences = []
 
         freq_map = {
@@ -160,6 +245,23 @@ class EventOccurrencesView(APIView):
         }
 
         for event in events:
+            attendee_objects = list(event.attendees.all())
+            attendees_payload = [
+                {
+                    "email": attendee.email,
+                    "display_name": attendee.display_name,
+                    "response_status": attendee.response_status,
+                    "is_self": attendee.is_self,
+                    "is_organizer": attendee.is_organizer,
+                    "optional": attendee.optional,
+                }
+                for attendee in attendee_objects
+            ]
+            self_attendee = next((a for a in attendee_objects if a.is_self), None)
+            self_response_status = (
+                self_attendee.response_status if self_attendee else None
+            )
+            can_rsvp = bool(self_attendee and event.google_event_id)
             event_duration = event.end - event.start
             if event_duration.total_seconds() <= 0:
                 event_duration = timedelta(minutes=1)
@@ -179,6 +281,9 @@ class EventOccurrencesView(APIView):
                             "is_recurring": False,
                             "recurrence_frequency": event.recurrence_frequency,
                             "recurrence_interval": event.recurrence_interval,
+                            "attendees": attendees_payload,
+                            "self_response_status": self_response_status,
+                            "can_rsvp": can_rsvp,
                         }
                     )
                 continue
@@ -221,6 +326,9 @@ class EventOccurrencesView(APIView):
                         "is_recurring": True,
                         "recurrence_frequency": event.recurrence_frequency,
                         "recurrence_interval": event.recurrence_interval,
+                        "attendees": attendees_payload,
+                        "self_response_status": self_response_status,
+                        "can_rsvp": can_rsvp,
                     }
                 )
                 generated += 1
@@ -499,7 +607,10 @@ class GoogleOAuthCallbackView(APIView):
 
     def get(self, request):
         frontend_base = settings.FRONTEND_APP_URL.rstrip("/") or "http://localhost:5173"
-        redirect_base = f"{frontend_base}"
+        redirect_path = getattr(settings, "GOOGLE_OAUTH_REDIRECT_PATH", "/dashboard")
+        if not redirect_path.startswith("/"):
+            redirect_path = f"/{redirect_path}"
+        redirect_base = f"{frontend_base}{redirect_path}"
 
         error = request.query_params.get("error")
         if error:
@@ -534,6 +645,71 @@ class GoogleOAuthCallbackView(APIView):
         }
         encoded = urlencode({k: v for k, v in summary.items() if k == "google_status" or v})
         return HttpResponseRedirect(f"{redirect_base}?{encoded}")
+
+
+class InvitationViewSet(viewsets.ModelViewSet):
+    serializer_class = InvitationSerializer
+    permission_classes = [IsAuthenticated]
+    http_method_names = ["get", "post", "delete", "head"]
+
+    def get_queryset(self):
+        return (
+            Invitation.objects.filter(invited_by=self.request.user)
+            .select_related("invited_by", "accepted_by")
+            .order_by("-created_at")
+        )
+
+    def perform_create(self, serializer):
+        expiry_days = getattr(settings, "INVITATION_EXPIRY_DAYS", 14)
+        extra_kwargs = {"invited_by": self.request.user}
+        if expiry_days:
+            extra_kwargs["expires_at"] = timezone.now() + timedelta(days=expiry_days)
+        invitation = serializer.save(**extra_kwargs)
+        send_invitation_email(invitation)
+        invitation.last_sent_at = timezone.now()
+        invitation.save(update_fields=["last_sent_at", "updated_at"])
+
+    @action(detail=True, methods=["post"])
+    def resend(self, request, pk=None):
+        invitation = self.get_object()
+        if invitation.status == Invitation.Status.ACCEPTED:
+            return Response(
+                {"detail": "Invitation already accepted."},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+        if invitation.status == Invitation.Status.EXPIRED:
+            return Response(
+                {"detail": "Invitation expired."},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+        send_invitation_email(invitation)
+        invitation.last_sent_at = timezone.now()
+        invitation.save(update_fields=["last_sent_at", "updated_at"])
+        serializer = self.get_serializer(invitation)
+        return Response(serializer.data)
+
+
+class InvitationLookupView(APIView):
+    permission_classes = [AllowAny]
+
+    def get(self, request, token):
+        try:
+            invitation = Invitation.objects.select_related("invited_by", "accepted_by").get(token=token)
+        except Invitation.DoesNotExist:
+            return Response(
+                {"detail": "Invitation not found."},
+                status=status.HTTP_404_NOT_FOUND,
+            )
+
+        data = {
+            "email": invitation.email,
+            "status": invitation.status,
+            "invited_by": invitation.invited_by.username,
+            "accepted_at": invitation.accepted_at.isoformat() if invitation.accepted_at else None,
+            "accepted_by": invitation.accepted_by.username if invitation.accepted_by else None,
+            "expires_at": invitation.expires_at.isoformat() if invitation.expires_at else None,
+        }
+        return Response(data)
 
 
 class NotificationListView(APIView):

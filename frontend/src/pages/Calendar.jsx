@@ -37,6 +37,7 @@ function createInitialForm(baseDate = new Date()) {
     recurrence_enabled: false,
     recurrence_frequency: "weekly",
     recurrence_interval: 1,
+    invitees: "",
   };
 }
 
@@ -324,6 +325,15 @@ const [formError, setFormError] = useState("");
       recurrence_end_date: null,
     };
 
+    const invitees = (form.invitees || "")
+      .split(/[\n,]/)
+      .map((item) => item.trim().toLowerCase())
+      .filter((item) => item.length > 0);
+    if (invitees.length > 0) {
+      const unique = Array.from(new Set(invitees));
+      payload.attendees = unique.map((email) => ({ email }));
+    }
+
     try {
       await api.post("/api/events/", payload);
       setIsModalOpen(false);
@@ -459,6 +469,20 @@ const [formError, setFormError] = useState("");
                   rows={3}
                 />
               </label>
+              <label className="calendar-modal-label">
+                <span>Invite attendees</span>
+                <textarea
+                  className="calendar-modal-input"
+                  name="invitees"
+                  value={form.invitees}
+                  onChange={onFormChange}
+                  placeholder="Add email addresses (comma or line separated)"
+                  rows={2}
+                />
+              </label>
+              <p className="calendar-modal-note">
+                Separate multiple emails with commas or line breaks.
+              </p>
               <label className="calendar-modal-label">
                 <span>Start</span>
                 {!form.all_day ? (

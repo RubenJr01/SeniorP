@@ -1,14 +1,16 @@
+import uuid
 from datetime import timedelta
+from unittest.mock import patch
 
 from django.contrib.auth.models import User
+from django.core import mail
 from django.test import override_settings
 from django.urls import reverse
 from django.utils import timezone
 from rest_framework import status
 from rest_framework.test import APITestCase
-from unittest.mock import patch
 
-from .models import Event, GoogleAccount, Notification, BrightspaceFeed
+from .models import BrightspaceFeed, Event, EventAttendee, GoogleAccount, Invitation, Notification
 
 
 class EventAPITests(APITestCase):
@@ -154,3 +156,164 @@ class EventAPITests(APITestCase):
         url = reverse("google-oauth-start")
         response = self.client.post(url)
         self.assertEqual(response.status_code, status.HTTP_503_SERVICE_UNAVAILABLE)
+
+
+class EventRSVPTests(APITestCase):
+    def setUp(self):
+        self.user = User.objects.create_user(
+            "pilot",
+            email="pilot@example.com",
+            password="password123",
+        )
+        self.client.force_authenticate(user=self.user)
+        now = timezone.now()
+        self.event = Event.objects.create(
+            pilot=self.user,
+            title="Invite test",
+            description="",
+            start=now,
+            end=now + timedelta(hours=1),
+            google_event_id="evt_123",
+            source=Event.Source.SYNCED,
+        )
+        self.account = GoogleAccount.objects.create(
+            user=self.user,
+            google_user_id="gid",
+            email="pilot@example.com",
+            access_token="token",
+            refresh_token="refresh",
+            token_expiry=timezone.now() + timedelta(hours=1),
+            scopes="openid",
+        )
+        EventAttendee.objects.create(
+            event=self.event,
+            email=self.account.email,
+            response_status=EventAttendee.ResponseStatus.NEEDS_ACTION,
+            is_self=True,
+            raw={},
+        )
+
+    @patch("api.views.update_attendee_response")
+    def test_rsvp_accepts_invite(self, mock_update):
+        def side_effect(account, event, response):
+            EventAttendee.objects.filter(
+                event=event,
+                email=account.email.lower(),
+            ).update(response_status=response)
+            return event
+
+        mock_update.side_effect = side_effect
+        url = reverse("event-rsvp", args=[self.event.pk])
+        response = self.client.post(
+            url,
+            {"response": EventAttendee.ResponseStatus.ACCEPTED},
+            format="json",
+        )
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        attendee = EventAttendee.objects.get(event=self.event, email=self.account.email.lower())
+        self.assertEqual(attendee.response_status, EventAttendee.ResponseStatus.ACCEPTED)
+        mock_update.assert_called_once()
+
+    def test_rsvp_invalid_choice(self):
+        url = reverse("event-rsvp", args=[self.event.pk])
+        response = self.client.post(url, {"response": "not-valid"}, format="json")
+        self.assertEqual(response.status_code, status.HTTP_400_BAD_REQUEST)
+
+
+class InvitationAPITests(APITestCase):
+    def setUp(self):
+        self.inviter = User.objects.create_user("inviter", password="password123")
+        self.client.force_authenticate(user=self.inviter)
+
+    @override_settings(
+        EMAIL_BACKEND="django.core.mail.backends.locmem.EmailBackend",
+        INVITATION_EXPIRY_DAYS=7,
+    )
+    def test_create_invitation_sends_email(self):
+        if hasattr(mail, "outbox"):
+            mail.outbox.clear()
+        url = reverse("invitation-list")
+        payload = {"email": "guest@example.com", "message": "Join us!"}
+        response = self.client.post(url, payload, format="json")
+        self.assertEqual(response.status_code, status.HTTP_201_CREATED)
+        self.assertEqual(Invitation.objects.count(), 1)
+        invitation = Invitation.objects.get()
+        self.assertEqual(invitation.email, "guest@example.com")
+        self.assertEqual(invitation.invited_by, self.inviter)
+        self.assertIsNotNone(invitation.last_sent_at)
+        self.assertEqual(len(mail.outbox), 1)
+        self.assertIn("guest@example.com", mail.outbox[0].to)
+        self.assertIn(str(invitation.token), mail.outbox[0].body)
+
+    @override_settings(EMAIL_BACKEND="django.core.mail.backends.locmem.EmailBackend")
+    def test_resend_invitation(self):
+        if hasattr(mail, "outbox"):
+            mail.outbox.clear()
+        invitation = Invitation.objects.create(invited_by=self.inviter, email="guest@example.com")
+        url = reverse("invitation-resend", kwargs={"pk": invitation.pk})
+        response = self.client.post(url)
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        invitation.refresh_from_db()
+        self.assertIsNotNone(invitation.last_sent_at)
+        self.assertGreaterEqual(len(mail.outbox), 1)
+
+    def test_resend_rejected_when_not_pending(self):
+        invitation = Invitation.objects.create(
+            invited_by=self.inviter,
+            email="guest@example.com",
+            accepted_at=timezone.now(),
+        )
+        url = reverse("invitation-resend", kwargs={"pk": invitation.pk})
+        response = self.client.post(url)
+        self.assertEqual(response.status_code, status.HTTP_400_BAD_REQUEST)
+
+    def test_invitation_lookup(self):
+        invitation = Invitation.objects.create(invited_by=self.inviter, email="guest@example.com")
+        self.client.force_authenticate(user=None)
+        url = reverse("invitation-lookup", kwargs={"token": invitation.token})
+        response = self.client.get(url)
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        self.assertEqual(response.data["email"], "guest@example.com")
+        self.assertEqual(response.data["status"], Invitation.Status.PENDING)
+
+
+class InvitationRegistrationTests(APITestCase):
+    def setUp(self):
+        self.inviter = User.objects.create_user("inviter", password="password123")
+        self.invitation = Invitation.objects.create(invited_by=self.inviter, email="guest@example.com")
+        self.register_url = reverse("register")
+
+    def test_register_with_invitation_marks_accepted(self):
+        payload = {
+            "username": "newcrew",
+            "password": "secret123",
+            "invite_token": str(self.invitation.token),
+        }
+        response = self.client.post(self.register_url, payload, format="json")
+        self.assertEqual(response.status_code, status.HTTP_201_CREATED)
+        self.invitation.refresh_from_db()
+        self.assertIsNotNone(self.invitation.accepted_at)
+        self.assertIsNotNone(self.invitation.accepted_by)
+        new_user = User.objects.get(username="newcrew")
+        self.assertEqual(new_user.email, "guest@example.com")
+
+    def test_register_with_invalid_invite_returns_error(self):
+        payload = {
+            "username": "anothercrew",
+            "password": "secret123",
+            "invite_token": str(uuid.uuid4()),
+        }
+        response = self.client.post(self.register_url, payload, format="json")
+        self.assertEqual(response.status_code, status.HTTP_400_BAD_REQUEST)
+        self.assertIn("invite_token", response.data)
+
+    def test_register_with_mismatched_email(self):
+        payload = {
+            "username": "wrongemail",
+            "password": "secret123",
+            "invite_token": str(self.invitation.token),
+            "email": "different@example.com",
+        }
+        response = self.client.post(self.register_url, payload, format="json")
+        self.assertEqual(response.status_code, status.HTTP_400_BAD_REQUEST)
+        self.assertIn("email", response.data)

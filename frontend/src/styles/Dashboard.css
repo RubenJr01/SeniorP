@@ -276,6 +276,27 @@
   padding: 2rem 2rem;
 }
 
+.dashboard-banner {
+  padding: 0.75rem 1rem;
+  border-radius: var(--radius-sm);
+  font-weight: 500;
+  border: 1px solid rgba(15, 23, 42, 0.08);
+  background: rgba(79, 70, 229, 0.08);
+  color: var(--text-primary);
+}
+
+.dashboard-banner--success {
+  background: rgba(34, 197, 94, 0.14);
+  border-color: rgba(34, 197, 94, 0.3);
+  color: #166534;
+}
+
+.dashboard-banner--error {
+  background: rgba(239, 68, 68, 0.16);
+  border-color: rgba(239, 68, 68, 0.3);
+  color: #b91c1c;
+}
+
 .dashboard-panel-heading {
   display: flex;
   justify-content: space-between;
@@ -500,6 +521,64 @@
   line-height: 1.55;
 }
 
+.dashboard-event-attendees {
+  margin: 0;
+  color: var(--text-secondary);
+  font-size: 0.92rem;
+}
+
+.dashboard-event-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.75rem;
+  align-items: center;
+  justify-content: space-between;
+}
+
+.dashboard-event-rsvp {
+  display: flex;
+  flex-direction: column;
+  gap: 0.35rem;
+}
+
+.dashboard-event-rsvp-label {
+  font-size: 0.9rem;
+  color: var(--text-secondary);
+}
+
+.dashboard-event-rsvp-buttons {
+  display: inline-flex;
+  gap: 0.4rem;
+  flex-wrap: wrap;
+}
+
+.dashboard-event-rsvp-button {
+  border: 1px solid rgba(15, 23, 42, 0.12);
+  background: #fff;
+  color: var(--text-primary);
+  padding: 0.45rem 0.9rem;
+  border-radius: 999px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: transform 0.15s ease, box-shadow 0.15s ease, background 0.15s ease;
+}
+
+.dashboard-event-rsvp-button:hover:not(:disabled) {
+  transform: translateY(-1px);
+  box-shadow: 0 12px 24px rgba(15, 23, 42, 0.12);
+}
+
+.dashboard-event-rsvp-button:disabled {
+  cursor: not-allowed;
+  opacity: 0.6;
+}
+
+.dashboard-event-rsvp-button--active {
+  background: rgba(79, 70, 229, 0.12);
+  border-color: rgba(79, 70, 229, 0.35);
+  color: var(--brand-primary);
+}
+
 .dashboard-tag {
   display: inline-flex;
   align-items: center;
@@ -535,6 +614,31 @@
 .dashboard-tag--muted {
   background: rgba(148, 163, 184, 0.16);
   color: #1f2937;
+}
+
+.dashboard-tag--rsvp {
+  background: rgba(59, 130, 246, 0.16);
+  color: #1d4ed8;
+}
+
+.dashboard-tag--rsvp-accepted {
+  background: rgba(34, 197, 94, 0.18);
+  color: #166534;
+}
+
+.dashboard-tag--rsvp-declined {
+  background: rgba(239, 68, 68, 0.18);
+  color: #b91c1c;
+}
+
+.dashboard-tag--rsvp-tentative {
+  background: rgba(250, 204, 21, 0.2);
+  color: #92400e;
+}
+
+.dashboard-tag--rsvp-needsAction {
+  background: rgba(96, 165, 250, 0.2);
+  color: #1d4ed8;
 }
 
 @media (max-width: 1100px) {

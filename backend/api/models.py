@@ -1,7 +1,10 @@
+import uuid
+
 from django.db import models
 from django.contrib.auth.models import User
 from django.core.exceptions import ValidationError
 from django.db.models import Q, F
+from django.utils import timezone
 
 
 class Event(models.Model):
@@ -102,6 +105,46 @@ class Event(models.Model):
     ]
 
 
+class EventAttendee(models.Model):
+  class ResponseStatus(models.TextChoices):
+    NEEDS_ACTION = "needsAction", "Needs action"
+    ACCEPTED = "accepted", "Accepted"
+    DECLINED = "declined", "Declined"
+    TENTATIVE = "tentative", "Tentative"
+
+  event = models.ForeignKey(
+    Event,
+    on_delete=models.CASCADE,
+    related_name="attendees",
+  )
+  email = models.EmailField()
+  display_name = models.CharField(max_length=255, blank=True)
+  response_status = models.CharField(
+    max_length=20,
+    choices=ResponseStatus.choices,
+    default=ResponseStatus.NEEDS_ACTION,
+  )
+  optional = models.BooleanField(default=False)
+  is_organizer = models.BooleanField(default=False)
+  is_self = models.BooleanField(default=False)
+  raw = models.JSONField(default=dict, blank=True)
+  created_at = models.DateTimeField(auto_now_add=True)
+  updated_at = models.DateTimeField(auto_now=True)
+
+  def save(self, *args, **kwargs):
+    if self.email:
+      self.email = self.email.strip().lower()
+    return super().save(*args, **kwargs)
+
+  def __str__(self):
+    role = "self" if self.is_self else "attendee"
+    return f"{self.email} ({role}) for {self.event_id}"
+
+  class Meta:
+    unique_together = (("event", "email"),)
+    ordering = ["event_id", "email"]
+
+
 class GoogleAccount(models.Model):
   user = models.OneToOneField(
     User,
@@ -174,6 +217,53 @@ class Notification(models.Model):
 
   def __str__(self):
     return f"Notification({self.user.username}, {self.type})"
+
+  class Meta:
+    ordering = ["-created_at"]
+
+
+class Invitation(models.Model):
+  class Status(models.TextChoices):
+    PENDING = "pending", "Pending"
+    ACCEPTED = "accepted", "Accepted"
+    EXPIRED = "expired", "Expired"
+
+  token = models.UUIDField(default=uuid.uuid4, editable=False, unique=True)
+  invited_by = models.ForeignKey(
+    User,
+    on_delete=models.CASCADE,
+    related_name="sent_invitations",
+  )
+  email = models.EmailField()
+  message = models.TextField(blank=True)
+  accepted_at = models.DateTimeField(null=True, blank=True)
+  accepted_by = models.ForeignKey(
+    User,
+    on_delete=models.SET_NULL,
+    null=True,
+    blank=True,
+    related_name="accepted_invitations",
+  )
+  expires_at = models.DateTimeField(null=True, blank=True)
+  last_sent_at = models.DateTimeField(null=True, blank=True)
+  created_at = models.DateTimeField(auto_now_add=True)
+  updated_at = models.DateTimeField(auto_now=True)
+
+  def __str__(self):
+    return f"Invitation to {self.email} by {self.invited_by.username}"
+
+  def is_expired(self):
+    if self.expires_at:
+      return timezone.now() >= self.expires_at
+    return False
+
+  @property
+  def status(self):
+    if self.accepted_at:
+      return self.Status.ACCEPTED
+    if self.is_expired():
+      return self.Status.EXPIRED
+    return self.Status.PENDING
 
   class Meta:
     ordering = ["-created_at"]
