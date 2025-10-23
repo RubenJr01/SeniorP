@@ -122,56 +122,6 @@ By default Vite serves the app at <http://localhost:5173>. The dev server provid
 
 ---
 
-## 5. Optional – Google Calendar Integration
-
-To use Google synchronisation features:
-
-1. Sign in to the [Google Cloud Console](https://console.cloud.google.com/).
-2. Enable the **Google Calendar API** for your project.
-3. Configure the OAuth consent screen (add yourself as a test user if the app is not yet verified).
-4. Create OAuth credentials of type **Web application** with:
-   - Authorized JavaScript origins: `http://localhost:5173`
-   - Authorized redirect URIs: `http://localhost:8000/api/google/oauth/callback/`
-5. Paste the generated `client_id` and `client_secret` into `backend/.env`.
-6. Restart the backend server so the new environment variables are loaded.
-7. In the web app, log in and click **Connect Google Calendar**; complete the OAuth flow, then use **Sync now** to pull events.
-
----
-
-## 6. Optional – Brightspace (UTRGV) Calendar Import
-
-You can pull course events from UTRGV's Brightspace (D2L) calendar using the built-in iCal feed.
-
-1. Log in to Brightspace and open the **Calendar** tool.
-2. Select the course(s) you want included, then click **Settings** → **Subscribe** (or **Subscribe to Calendar** in the classic interface).
-3. Brightspace shows an **iCal subscription URL**. Copy the URL to your clipboard.
-4. In V-Cal, open the **Calendar** page and click **Import Brightspace**.
-5. Paste the iCal URL, submit the form, and wait a few seconds. Events are imported into your account with the source label **Brightspace**; existing events with the same UID are updated. The URL is stored securely per user so future imports only require clicking **Import Brightspace** (leave the field empty to refresh with the saved feed).
-
-You can also trigger the import via the API:
-
-```bash
-# First-time import (saves the URL)
-curl -X POST http://localhost:8000/api/calendar/brightspace/import/ \
-  -H "Authorization: Bearer <your-access-token>" \
-  -H "Content-Type: application/json" \
-  -d '{"ics_url": "https://byui.brightspace.com/d2l/le/calendar/export/ical/..."}'
-
-# Subsequent refresh using the stored URL
-curl -X POST http://localhost:8000/api/calendar/brightspace/import/ \
-  -H "Authorization: Bearer <your-access-token>" \
-  -H "Content-Type: application/json" \
-  -d '{}'
-```
-
-> The backend stores both the iCal URL and individual event UIDs, so re-importing keeps events in sync instead of duplicating them.
-
----
-
-## 7. Running Both Services Together
-
-| Terminal | Command                                       | URL                                   |
-|----------|-----------------------------------------------|----------------------------------------|
 | Backend  | `python manage.py runserver`                  | <http://localhost:8000>                |
 | Frontend | `npm run dev`                                 | <http://localhost:5173>                |
 
