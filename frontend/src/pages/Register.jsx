@@ -95,7 +95,6 @@ function Register() {
             subtitle="We just need a username and password to get started."
             initialEmail={inviteInfo?.email || ""}
             inviteToken={inviteToken}
-            emailLocked={Boolean(inviteToken)}
             disabled={formDisabled}
             footer={
               <span className="auth-switch">

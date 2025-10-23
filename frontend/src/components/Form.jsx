@@ -13,7 +13,6 @@ function Form({
   footer,
   initialEmail = "",
   inviteToken = "",
-  emailLocked = false,
   disabled = false,
 }) {
   const [username, setUsername] = useState("");
@@ -42,12 +41,10 @@ function Form({
 
     try {
       const payload = { username, password };
-      if (!isLogin) {
+      if (!isLogin && inviteToken) {
+        payload.invite_token = inviteToken;
         if (email) {
           payload.email = email;
-        }
-        if (inviteToken) {
-          payload.invite_token = inviteToken;
         }
       }
 
@@ -95,22 +92,6 @@ function Form({
             required
           />
         </label>
-
-        {!isLogin && (
-          <label className="form-field">
-            <span className="form-label">Email</span>
-            <input
-              className="form-input"
-              type="email"
-              value={email}
-              onChange={(event) => setEmail(event.target.value)}
-              placeholder="Enter your email"
-              autoComplete="email"
-              disabled={loading || disabled || emailLocked}
-              required={Boolean(inviteToken)}
-            />
-          </label>
-        )}
 
         <label className="form-field">
           <span className="form-label">Password</span>
