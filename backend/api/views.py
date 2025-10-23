@@ -1,5 +1,7 @@
 from urllib.parse import urlencode
 from datetime import datetime, timedelta, time, date
+import logging
+import re
 
 from dateutil import parser as date_parser
 from dateutil import rrule
@@ -14,7 +16,6 @@ from rest_framework.decorators import action
 from rest_framework.permissions import AllowAny, IsAuthenticated
 from rest_framework.response import Response
 from rest_framework.views import APIView
-import re
 
 from .google_calendar import (
     GoogleSyncError,
@@ -25,6 +26,7 @@ from .google_calendar import (
     revoke_google_account,
     run_two_way_sync,
     update_attendee_response,
+    push_event_to_google,
 )
 from .models import (
     Event,
@@ -44,6 +46,8 @@ from .serializers import (
 )
 from .notifications import create_notification
 from .invitations import send_invitation_email
+
+logger = logging.getLogger(__name__)
 
 class CreateUserView(generics.CreateAPIView):
     queryset = User.objects.all()
@@ -76,6 +80,7 @@ class EventViewSet(viewsets.ModelViewSet):
             },
             event=event,
         )
+        self._sync_event_to_google(event)
 
     def perform_update(self, serializer):
         event = serializer.save()
@@ -92,6 +97,7 @@ class EventViewSet(viewsets.ModelViewSet):
             },
             event=event,
         )
+        self._sync_event_to_google(event)
 
     @action(detail=True, methods=["post"])
     def rsvp(self, request, pk=None):
@@ -162,6 +168,18 @@ class EventViewSet(viewsets.ModelViewSet):
         )
         serializer = EventSerializer(hydrated, context=self.get_serializer_context())
         return Response(serializer.data)
+
+    def _sync_event_to_google(self, event):
+        try:
+            account = event.pilot.google_account
+        except GoogleAccount.DoesNotExist:
+            return event
+
+        try:
+            return push_event_to_google(account, event)
+        except GoogleSyncError as exc:
+            logger.warning("Failed to push event %s to Google: %s", event.pk, exc)
+            return event
 
     def perform_destroy(self, instance):
         account = None
@@ -572,13 +590,6 @@ class GoogleSyncView(APIView):
                 {"detail": str(exc)},
                 status=status.HTTP_502_BAD_GATEWAY,
             )
-        create_notification(
-            user=request.user,
-            type=Notification.Type.GOOGLE_SYNC,
-            title="Google Calendar sync completed",
-            message="Two-way sync with Google Calendar finished.",
-            data={"stats": stats},
-        )
         return Response({"stats": stats})
 
 
@@ -592,13 +603,6 @@ class GoogleDisconnectView(APIView):
             return Response(status=status.HTTP_204_NO_CONTENT)
 
         revoke_google_account(account)
-        create_notification(
-            user=request.user,
-            type=Notification.Type.GOOGLE_SYNC,
-            title="Google Calendar disconnected",
-            message="Google Calendar account has been disconnected.",
-            data={"action": "disconnect"},
-        )
         return Response(status=status.HTTP_204_NO_CONTENT)
 
 
@@ -628,14 +632,6 @@ class GoogleOAuthCallbackView(APIView):
         except (StateError, GoogleSyncError) as exc:
             params = {"google_status": "error", "message": str(exc) or "oauth_failed"}
             return HttpResponseRedirect(f"{redirect_base}?{urlencode(params)}")
-
-        create_notification(
-            user=account.user,
-            type=Notification.Type.GOOGLE_SYNC,
-            title="Google Calendar connected",
-            message="Google Calendar account connected and initial sync complete.",
-            data={"stats": stats, "action": "connect"},
-        )
 
         summary = {
             "google_status": "success",
@@ -723,7 +719,9 @@ class NotificationListView(APIView):
             limit = 20
         limit = max(1, min(limit, 100))
 
-        base_queryset = Notification.objects.filter(user=request.user)
+        base_queryset = Notification.objects.filter(user=request.user).exclude(
+            type=Notification.Type.GOOGLE_SYNC
+        )
         notifications = base_queryset.order_by("-created_at")[:limit]
         serializer = NotificationSerializer(notifications, many=True)
         unread_count = base_queryset.filter(read_at__isnull=True).count()

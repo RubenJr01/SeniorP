@@ -17,6 +17,8 @@ function Navigation() {
   const menuToggleRef = useRef(null);
   const notificationsRef = useRef(null);
   const notificationsToggleRef = useRef(null);
+  const autoCloseTimeoutRef = useRef(null);
+  const AUTO_CLOSE_DELAY = 5000;
 
   useEffect(() => {
     const handleScroll = () => {
@@ -33,6 +35,30 @@ function Navigation() {
     setMenuOpen(false);
     setNotificationsOpen(false);
   }, [location.pathname]);
+
+  const clearAutoCloseTimer = useCallback(() => {
+    if (autoCloseTimeoutRef.current) {
+      clearTimeout(autoCloseTimeoutRef.current);
+      autoCloseTimeoutRef.current = null;
+    }
+  }, []);
+
+  const startAutoCloseTimer = useCallback(() => {
+    clearAutoCloseTimer();
+    autoCloseTimeoutRef.current = setTimeout(() => {
+      setNotificationsOpen(false);
+    }, AUTO_CLOSE_DELAY);
+  }, [clearAutoCloseTimer]);
+
+  useEffect(() => clearAutoCloseTimer, [clearAutoCloseTimer]);
+
+  useEffect(() => {
+    if (notificationsOpen) {
+      startAutoCloseTimer();
+    } else {
+      clearAutoCloseTimer();
+    }
+  }, [notificationsOpen, startAutoCloseTimer, clearAutoCloseTimer]);
 
   useEffect(() => {
     if (!menuOpen && !notificationsOpen) return undefined;
@@ -110,7 +136,6 @@ function Navigation() {
       event_created: "Mission scheduled",
       event_updated: "Mission updated",
       event_deleted: "Mission removed",
-      google_sync: "Google sync",
       brightspace_import: "Brightspace import",
     }),
     [],
@@ -126,6 +151,27 @@ function Navigation() {
     }
     return classes.join(" ");
   }, [location.pathname, scrolled]);
+
+  const handlePanelMouseEnter = useCallback(() => {
+    clearAutoCloseTimer();
+  }, [clearAutoCloseTimer]);
+
+  const handlePanelMouseLeave = useCallback(() => {
+    startAutoCloseTimer();
+  }, [startAutoCloseTimer]);
+
+  const handlePanelFocus = useCallback(() => {
+    clearAutoCloseTimer();
+  }, [clearAutoCloseTimer]);
+
+  const handlePanelBlur = useCallback(
+    (event) => {
+      if (!notificationsRef.current?.contains(event.relatedTarget)) {
+        startAutoCloseTimer();
+      }
+    },
+    [startAutoCloseTimer],
+  );
 
   return (
     <nav className={navClassName}>
@@ -224,6 +270,11 @@ function Navigation() {
                   notificationsOpen ? " app-nav__notifications-panel--open" : ""
                 }`}
                 role="status"
+                tabIndex={-1}
+                onMouseEnter={handlePanelMouseEnter}
+                onMouseLeave={handlePanelMouseLeave}
+                onFocus={handlePanelFocus}
+                onBlur={handlePanelBlur}
               >
                 <div className="app-nav__notifications-header">
                   <span>Notifications</span>
