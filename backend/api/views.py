@@ -1,7 +1,9 @@
-from urllib.parse import urlencode
+from urllib.parse import urlencode, urlparse, urljoin
 from datetime import datetime, timedelta, time, date
 import logging
 import re
+import ipaddress
+import socket
 
 from dateutil import parser as date_parser
 from dateutil import rrule
@@ -48,6 +50,8 @@ from .notifications import create_notification
 from .invitations import send_invitation_email
 
 logger = logging.getLogger(__name__)
+BRIGHTSPACE_MAX_BYTES = getattr(settings, "BRIGHTSPACE_MAX_ICS_BYTES", 5 * 1024 * 1024)
+BRIGHTSPACE_REDIRECT_LIMIT = 3
 
 class CreateUserView(generics.CreateAPIView):
     queryset = User.objects.all()
@@ -361,6 +365,84 @@ class EventOccurrencesView(APIView):
 class BrightspaceImportView(APIView):
   permission_classes = [IsAuthenticated]
 
+  @staticmethod
+  def _validate_ics_url(raw_url: str) -> str:
+    parsed = urlparse(raw_url)
+    if parsed.scheme not in ("http", "https") or not parsed.netloc:
+      raise ValueError("ICS URL must be an absolute http(s) URL.")
+
+    hostname = parsed.hostname
+    if hostname is None:
+      raise ValueError("ICS URL is missing a hostname.")
+
+    try:
+      addr_info = socket.getaddrinfo(hostname, None)
+    except socket.gaierror as exc:
+      raise ValueError(f"Could not resolve host {hostname}.") from exc
+
+    for _, _, _, _, sockaddr in addr_info:
+      ip_str = sockaddr[0]
+      ip = ipaddress.ip_address(ip_str)
+      if any(
+        (
+          ip.is_loopback,
+          ip.is_link_local,
+          ip.is_private,
+          ip.is_reserved,
+          ip.is_multicast,
+        )
+      ):
+        raise ValueError("ICS URL resolves to a non-public address.")
+
+    return parsed.geturl()
+
+  @staticmethod
+  def _resolve_redirect(current_url: str, location: str) -> str:
+    next_url = urljoin(current_url, location)
+    return BrightspaceImportView._validate_ics_url(next_url)
+
+  def _download_ics(self, initial_url: str) -> bytes:
+    session = requests.Session()
+    current_url = initial_url
+
+    for _ in range(BRIGHTSPACE_REDIRECT_LIMIT + 1):
+      try:
+        with session.get(
+          current_url,
+          timeout=15,
+          stream=True,
+          allow_redirects=False,
+        ) as response:
+          if response.is_redirect or response.status_code in (301, 302, 303, 307, 308):
+            location = response.headers.get("Location")
+            if not location:
+              raise ValueError("Redirect response missing Location header.")
+            current_url = self._resolve_redirect(current_url, location)
+            continue
+
+          response.raise_for_status()
+
+          content_length = response.headers.get("Content-Length")
+          if content_length:
+            try:
+              declared_size = int(content_length)
+            except ValueError:
+              declared_size = None
+            else:
+              if declared_size > BRIGHTSPACE_MAX_BYTES:
+                raise ValueError("ICS feed exceeds allowed size.")
+
+          buffer = bytearray()
+          for chunk in response.iter_content(chunk_size=65536):
+            buffer.extend(chunk)
+            if len(buffer) > BRIGHTSPACE_MAX_BYTES:
+              raise ValueError("ICS feed exceeds allowed size.")
+          return bytes(buffer)
+      except requests.RequestException as exc:
+        raise ValueError(f"Failed to download ICS feed: {exc}") from exc
+
+    raise ValueError("ICS feed exceeded redirect limit.")
+
   def get(self, request):
     try:
       feed = request.user.brightspace_feed
@@ -391,12 +473,17 @@ class BrightspaceImportView(APIView):
     provided_url = serializer.validated_data.get("ics_url", "").strip()
 
     feed_instance = None
+    safe_ics_url = None
     if provided_url:
+      try:
+        safe_ics_url = self._validate_ics_url(provided_url)
+      except ValueError as exc:
+        return Response({"detail": str(exc)}, status=status.HTTP_400_BAD_REQUEST)
       feed_instance, _ = BrightspaceFeed.objects.update_or_create(
         user=request.user,
-        defaults={"ics_url": provided_url},
+        defaults={"ics_url": safe_ics_url},
       )
-      ics_url = provided_url
+      ics_url = safe_ics_url
     else:
       try:
         feed_instance = request.user.brightspace_feed
@@ -409,17 +496,19 @@ class BrightspaceImportView(APIView):
         )
       ics_url = feed_instance.ics_url
 
-    try:
-      response = requests.get(ics_url, timeout=15)
-      response.raise_for_status()
-    except requests.RequestException as exc:
-      return Response(
-        {"detail": f"Failed to download ICS feed: {exc}"},
-        status=status.HTTP_400_BAD_REQUEST,
-      )
+      try:
+        safe_ics_url = self._validate_ics_url(ics_url)
+      except ValueError as exc:
+        return Response({"detail": str(exc)}, status=status.HTTP_400_BAD_REQUEST)
+      ics_url = safe_ics_url
 
     try:
-      calendar = Calendar.from_ical(response.content)
+      ics_payload = self._download_ics(ics_url)
+    except ValueError as exc:
+      return Response({"detail": str(exc)}, status=status.HTTP_400_BAD_REQUEST)
+
+    try:
+      calendar = Calendar.from_ical(ics_payload)
     except ValueError:
       return Response(
         {"detail": "The provided ICS feed is not valid."},

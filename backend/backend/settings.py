@@ -4,6 +4,7 @@ from datetime import timedelta
 import os
 
 from dotenv import load_dotenv
+from django.core.exceptions import ImproperlyConfigured
 
 BASE_DIR = Path(__file__).resolve().parent.parent
 
@@ -12,8 +13,20 @@ load_dotenv(BASE_DIR / ".env")
 load_dotenv(BASE_DIR / "backend" / ".env")
 
 # --- Env flags ---
-SECRET_KEY = os.getenv("DJANGO_SECRET_KEY", "dev-secret-key")
-DEBUG = os.getenv("DJANGO_DEBUG", "True").lower() == "true"
+debug_flag = os.getenv("DJANGO_DEBUG")
+if debug_flag is None:
+    DEBUG = False
+else:
+    DEBUG = debug_flag.lower() == "true"
+
+SECRET_KEY = os.getenv("DJANGO_SECRET_KEY")
+if not SECRET_KEY:
+    if DEBUG:
+        SECRET_KEY = "dev-secret-key"
+    else:
+        raise ImproperlyConfigured(
+            "DJANGO_SECRET_KEY must be set when DJANGO_DEBUG is false."
+        )
 
 # !!! EDIT THESE TWO with your real subdomains !!!
 FRONTEND_TUNNEL = "compression-olympus-discovery-layout.trycloudflare.com"
@@ -97,6 +110,10 @@ DEFAULT_AUTO_FIELD = "django.db.models.BigAutoField"
 REST_FRAMEWORK = {
     "DEFAULT_AUTHENTICATION_CLASSES": ("rest_framework_simplejwt.authentication.JWTAuthentication",),
     "DEFAULT_PERMISSION_CLASSES": ["rest_framework.permissions.IsAuthenticated"],
+    "DEFAULT_THROTTLE_CLASSES": [
+        "rest_framework.throttling.UserRateThrottle",
+        "rest_framework.throttling.AnonRateThrottle",
+    ],
 }
 SIMPLE_JWT = {
     "ACCESS_TOKEN_LIFETIME": timedelta(minutes=30),
@@ -118,6 +135,9 @@ GOOGLE_SCOPES = [
     "https://www.googleapis.com/auth/calendar",
 ]
 GOOGLE_OAUTH_PROMPT = os.getenv("GOOGLE_OAUTH_PROMPT", "consent")
+GOOGLE_API_TIMEOUT_SECONDS = int(os.getenv("GOOGLE_API_TIMEOUT_SECONDS", "15"))
+API_USER_THROTTLE_RATE = os.getenv("API_USER_THROTTLE_RATE", "300/min")
+API_ANON_THROTTLE_RATE = os.getenv("API_ANON_THROTTLE_RATE", "60/min")
 
 # --- CORS / CSRF for tunnels ---
 CORS_ALLOW_ALL_ORIGINS = False
@@ -135,8 +155,12 @@ CORS_ALLOW_METHODS = ["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"]
 
 
 CSRF_TRUSTED_ORIGINS = [
-    f"https://{FRONTEND_TUNNEL}",
-    f"https://{BACKEND_TUNNEL}",
+    origin
+    for origin in (
+        f"https://{FRONTEND_TUNNEL}" if FRONTEND_TUNNEL else "",
+        f"https://{BACKEND_TUNNEL}" if BACKEND_TUNNEL else "",
+    )
+    if origin
 ]
 
 # --- Celery / Redis ---
@@ -146,6 +170,11 @@ CELERY_ACCEPT_CONTENT = ["json"]
 CELERY_TASK_SERIALIZER = "json"
 CELERY_RESULT_SERIALIZER = "json"
 CELERY_TIMEZONE = TIME_ZONE
+CELERY_TASK_ALWAYS_EAGER = os.getenv(
+    "CELERY_TASK_ALWAYS_EAGER",
+    "true" if DEBUG else "false",
+).lower() == "true"
+CELERY_TASK_EAGER_PROPAGATES = True
 
 # --- Email / Invitations ---
 EMAIL_BACKEND = os.getenv(
@@ -154,3 +183,12 @@ EMAIL_BACKEND = os.getenv(
 )
 DEFAULT_FROM_EMAIL = os.getenv("DJANGO_DEFAULT_FROM_EMAIL", "V-Cal <no-reply@v-cal.local>")
 INVITATION_EXPIRY_DAYS = int(os.getenv("INVITATION_EXPIRY_DAYS", "14"))
+
+# --- Brightspace ---
+BRIGHTSPACE_MAX_ICS_BYTES = int(os.getenv("BRIGHTSPACE_MAX_ICS_BYTES", str(5 * 1024 * 1024)))
+
+# DRF throttle rates (configured after constants to use env values)
+REST_FRAMEWORK["DEFAULT_THROTTLE_RATES"] = {
+    "user": API_USER_THROTTLE_RATE,
+    "anon": API_ANON_THROTTLE_RATE,
+}

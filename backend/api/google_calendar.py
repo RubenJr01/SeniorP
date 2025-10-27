@@ -1,5 +1,5 @@
 import logging
-from datetime import datetime, timedelta, timezone as dt_timezone
+from datetime import datetime, timedelta, timezone as dt_timezone, time
 from typing import Dict, Tuple, Optional
 
 from django.conf import settings
@@ -13,9 +13,11 @@ from django.utils.dateparse import parse_datetime
 from google.auth.transport.requests import Request
 from google.oauth2 import id_token
 from google.oauth2.credentials import Credentials
+import httplib2
 from googleapiclient.discovery import build
 from googleapiclient.errors import HttpError
 from google_auth_oauthlib.flow import Flow
+from google_auth_httplib2 import AuthorizedHttp
 
 from .models import Event, EventAttendee, GoogleAccount
 
@@ -140,7 +142,9 @@ def refresh_credentials(account: GoogleAccount) -> Credentials:
 
 def build_service(account: GoogleAccount):
   creds = refresh_credentials(account)
-  return build("calendar", "v3", credentials=creds, cache_discovery=False)
+  timeout = getattr(settings, "GOOGLE_API_TIMEOUT_SECONDS", 15)
+  http = AuthorizedHttp(creds, http=httplib2.Http(timeout=timeout))
+  return build("calendar", "v3", http=http, cache_discovery=False)
 
 
 def _normalize_title(title: str) -> str:
@@ -367,6 +371,31 @@ def _event_body_for_google(event: Event) -> Dict:
   attendees_payload = _attendees_payload_for_google(event)
   if attendees_payload:
     body["attendees"] = attendees_payload
+  recurrence_map = {
+    Event.RecurrenceFrequency.DAILY: "DAILY",
+    Event.RecurrenceFrequency.WEEKLY: "WEEKLY",
+    Event.RecurrenceFrequency.MONTHLY: "MONTHLY",
+    Event.RecurrenceFrequency.YEARLY: "YEARLY",
+  }
+  freq = recurrence_map.get(event.recurrence_frequency)
+  if freq:
+    rule_parts = [f"FREQ={freq}"]
+    interval = max(1, event.recurrence_interval or 1)
+    rule_parts.append(f"INTERVAL={interval}")
+    if event.recurrence_count:
+      rule_parts.append(f"COUNT={event.recurrence_count}")
+    elif event.recurrence_end_date:
+      end_time = datetime.combine(
+        event.recurrence_end_date,
+        time(23, 59, 59) if event.all_day else event.start.timetz(),
+      )
+      if timezone.is_naive(end_time):
+        end_time = timezone.make_aware(end_time, event.start.tzinfo or UTC)
+      until = end_time.astimezone(UTC).strftime("%Y%m%dT%H%M%SZ")
+      rule_parts.append(f"UNTIL={until}")
+    body["recurrence"] = [f"RRULE:{';'.join(rule_parts)}"]
+  else:
+    body["recurrence"] = []
   return body
 
 
