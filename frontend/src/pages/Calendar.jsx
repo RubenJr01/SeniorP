@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import Navigation from "../components/Navigation";
+import DayView from "../components/DayView";
 import api from "../api";
 import "../styles/Calendar.css";
 
@@ -97,10 +98,12 @@ function Calendar() {
   const [events, setEvents] = useState([]);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
-const [isModalOpen, setIsModalOpen] = useState(false);
-const [form, setForm] = useState(() => createInitialForm());
-const [submitting, setSubmitting] = useState(false);
-const [formError, setFormError] = useState("");
+  const [isModalOpen, setIsModalOpen] = useState(false);
+  const [form, setForm] = useState(() => createInitialForm());
+  const [submitting, setSubmitting] = useState(false);
+  const [formError, setFormError] = useState("");
+  const [isDayViewOpen, setIsDayViewOpen] = useState(false);
+  const [selectedDayCell, setSelectedDayCell] = useState(null);
 
   const currentMonthKey = useMemo(() => getMonthKey(referenceDate), [referenceDate]);
 
@@ -175,10 +178,25 @@ const [formError, setFormError] = useState("");
     if (!cell.inCurrentMonth) {
       return;
     }
-    const initialForm = createInitialForm(cell.date);
-    setForm(initialForm);
-    setFormError("");
-    setIsModalOpen(true);
+
+    // Always show day view for any clicked day
+    setSelectedDayCell(cell);
+    setIsDayViewOpen(true);
+  };
+
+  const handleCloseDayView = () => {
+    setIsDayViewOpen(false);
+    setSelectedDayCell(null);
+  };
+
+  const handleCreateFromDayView = () => {
+    if (selectedDayCell) {
+      const initialForm = createInitialForm(selectedDayCell.date);
+      setForm(initialForm);
+      setFormError("");
+      setIsDayViewOpen(false);
+      setIsModalOpen(true);
+    }
   };
 
   const onFormChange = (e) => {
@@ -578,6 +596,15 @@ const [formError, setFormError] = useState("");
             </form>
           </div>
         </div>
+      )}
+      {isDayViewOpen && selectedDayCell && (
+        <DayView
+          date={selectedDayCell.date}
+          events={selectedDayCell.events}
+          onClose={handleCloseDayView}
+          onCreateEvent={handleCreateFromDayView}
+          onEventUpdated={() => refreshOccurrences(referenceDate)}
+        />
       )}
     </>
   );

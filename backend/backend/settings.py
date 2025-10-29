@@ -133,9 +133,12 @@ GOOGLE_SCOPES = [
     "https://www.googleapis.com/auth/userinfo.email",
     "https://www.googleapis.com/auth/userinfo.profile",
     "https://www.googleapis.com/auth/calendar",
+    "https://www.googleapis.com/auth/gmail.readonly",
 ]
 GOOGLE_OAUTH_PROMPT = os.getenv("GOOGLE_OAUTH_PROMPT", "consent")
 GOOGLE_API_TIMEOUT_SECONDS = int(os.getenv("GOOGLE_API_TIMEOUT_SECONDS", "15"))
+GOOGLE_PUBSUB_TOPIC = os.getenv("GOOGLE_PUBSUB_TOPIC", "")
+GOOGLE_WEBHOOK_BASE_URL = os.getenv("GOOGLE_WEBHOOK_BASE_URL", "http://localhost:8000")
 API_USER_THROTTLE_RATE = os.getenv("API_USER_THROTTLE_RATE", "300/min")
 API_ANON_THROTTLE_RATE = os.getenv("API_ANON_THROTTLE_RATE", "60/min")
 

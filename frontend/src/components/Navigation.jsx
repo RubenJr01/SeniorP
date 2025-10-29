@@ -210,6 +210,16 @@ function Navigation() {
               Calendar
             </NavLink>
           )}
+          {isAuthenticated && (
+            <NavLink
+              to="/parse-email"
+              className={({ isActive }) =>
+                `app-nav__link ${isActive ? "app-nav__link--active" : ""}`
+              }
+            >
+              📧 Parse Email
+            </NavLink>
+          )}
           {!isAuthenticated && (
             <NavLink
               to="/register"

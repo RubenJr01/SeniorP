@@ -44,6 +44,10 @@ export default function Dashboard() {
   const [brightspaceLinked, setBrightspaceLinked] = useState(false);
   const [brightspaceWorking, setBrightspaceWorking] = useState(false);
   const [brightspaceMessage, setBrightspaceMessage] = useState("");
+  const [gmailWatchActive, setGmailWatchActive] = useState(false);
+  const [gmailWatchWorking, setGmailWatchWorking] = useState(false);
+  const [gmailWatchMessage, setGmailWatchMessage] = useState("");
+  const [gmailWatchExpiry, setGmailWatchExpiry] = useState(null);
   const [rsvpWorking, setRsvpWorking] = useState(null);
   const [rsvpMessage, setRsvpMessage] = useState(null);
 
@@ -77,6 +81,20 @@ export default function Dashboard() {
     }
   }, []);
 
+  const loadGmailWatchStatus = useCallback(async () => {
+    if (!googleStatus.connected) {
+      setGmailWatchActive(false);
+      return;
+    }
+    try {
+      const { data } = await api.get("/api/gmail/watch/");
+      setGmailWatchActive(data.active);
+      setGmailWatchExpiry(data.expires_at);
+    } catch {
+      setGmailWatchActive(false);
+    }
+  }, [googleStatus.connected]);
+
   useEffect(() => {
     fetchOccurrences();
   }, [fetchOccurrences]);
@@ -84,6 +102,10 @@ export default function Dashboard() {
   useEffect(() => {
     loadGoogleStatus();
   }, [loadGoogleStatus]);
+
+  useEffect(() => {
+    loadGmailWatchStatus();
+  }, [loadGmailWatchStatus]);
 
   useEffect(() => {
     const params = new URLSearchParams(location.search);
@@ -244,6 +266,41 @@ export default function Dashboard() {
       setBrightspaceWorking(false);
     }
   }, [brightspaceWorking, fetchOccurrences]);
+
+  const handleStartGmailWatch = useCallback(async () => {
+    if (gmailWatchWorking) return;
+    setGmailWatchWorking(true);
+    setGmailWatchMessage("");
+    try {
+      const { data } = await api.post("/api/gmail/watch/");
+      setGmailWatchActive(true);
+      setGmailWatchExpiry(data.watch?.expires_at);
+      setGmailWatchMessage("Gmail monitoring enabled! Events will be auto-created from calendar emails.");
+    } catch (err) {
+      const message = err.response?.data?.error || "Failed to enable Gmail monitoring.";
+      setGmailWatchMessage(message);
+      setGmailWatchActive(false);
+    } finally {
+      setGmailWatchWorking(false);
+    }
+  }, [gmailWatchWorking]);
+
+  const handleStopGmailWatch = useCallback(async () => {
+    if (gmailWatchWorking) return;
+    setGmailWatchWorking(true);
+    setGmailWatchMessage("");
+    try {
+      await api.delete("/api/gmail/watch/");
+      setGmailWatchActive(false);
+      setGmailWatchExpiry(null);
+      setGmailWatchMessage("Gmail monitoring disabled.");
+    } catch (err) {
+      const message = err.response?.data?.error || "Failed to disable Gmail monitoring.";
+      setGmailWatchMessage(message);
+    } finally {
+      setGmailWatchWorking(false);
+    }
+  }, [gmailWatchWorking]);
 
   const handleRsvp = useCallback(
     async (eventId, response) => {
@@ -468,6 +525,26 @@ export default function Dashboard() {
                     {brightspaceMessage}
                   </p>
                 )}
+              </>
+            )}
+            <div className="dashboard-stat-divider" aria-hidden="true" />
+            <span className="dashboard-stat-label">Gmail auto-parse</span>
+            {googleStatus.connected ? (
+              gmailWatchActive ? (
+                <>
+                  <span className="dashboard-stat-value">Active</span>
+                  <p>Automatically creating events from calendar emails</p>
+                </>
+              ) : (
+                <>
+                  <span className="dashboard-stat-value">Initializing...</span>
+                  <p>Gmail monitoring will start automatically</p>
+                </>
+              )
+            ) : (
+              <>
+                <span className="dashboard-stat-value">—</span>
+                <p>Connect Google Calendar to enable</p>
               </>
             )}
           </article>

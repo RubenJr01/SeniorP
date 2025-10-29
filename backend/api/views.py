@@ -722,6 +722,16 @@ class GoogleOAuthCallbackView(APIView):
             params = {"google_status": "error", "message": str(exc) or "oauth_failed"}
             return HttpResponseRedirect(f"{redirect_base}?{urlencode(params)}")
 
+        # Automatically start Gmail watch if user has Gmail scope
+        if "gmail" in account.scopes.lower():
+            try:
+                from .gmail_integration import start_gmail_watch
+                start_gmail_watch(account)
+                logger.info(f"Auto-started Gmail watch for user {account.user_id}")
+            except Exception as exc:
+                logger.warning(f"Failed to auto-start Gmail watch for user {account.user_id}: {exc}")
+                # Don't break OAuth flow if Gmail watch fails
+
         summary = {
             "google_status": "success",
             "imported": stats.get("created", 0),
@@ -830,3 +840,324 @@ class NotificationListView(APIView):
 
         updated = queryset.update(read_at=timezone.now())
         return Response({"updated": updated})
+
+
+class ParseEmailView(APIView):
+    """
+    API endpoint to parse email text and create a calendar event using AI.
+
+    POST /api/events/parse-email/
+    Body: {"email_text": "raw email content..."}
+    Returns: Created event details
+    """
+    permission_classes = [IsAuthenticated]
+
+    def post(self, request):
+        email_text = request.data.get("email_text", "").strip()
+
+        if not email_text:
+            return Response(
+                {"error": "email_text is required"},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        try:
+            from .email_parser import parse_email_to_event
+
+            # Parse email using Groq AI
+            logger.info(f"User {request.user.username} parsing email with Groq AI")
+            event_data = parse_email_to_event(email_text)
+
+            # Create the event
+            event = Event.objects.create(
+                pilot=request.user,
+                source=Event.Source.LOCAL,
+                title=event_data["title"],
+                start=event_data["start"],
+                end=event_data["end"],
+                description=event_data.get("description", ""),
+                all_day=event_data.get("all_day", False),
+            )
+
+            # Create notification
+            create_notification(
+                user=request.user,
+                type=Notification.Type.EVENT_CREATED,
+                title=f"Event created from email: {event.title}",
+                message=f"AI parsed your email and created an event for {event.start.strftime('%Y-%m-%d %H:%M')}",
+                data={
+                    "event_id": event.pk,
+                    "action": "parsed_from_email",
+                    "start": event.start.isoformat(),
+                },
+                event=event,
+            )
+
+            # Serialize and return
+            serializer = EventSerializer(event)
+            logger.info(f"Successfully created event {event.pk} from email parsing")
+
+            return Response(
+                {
+                    "message": "Event created successfully from email",
+                    "event": serializer.data,
+                },
+                status=status.HTTP_201_CREATED,
+            )
+
+        except ValueError as e:
+            logger.warning(f"Email parsing validation error: {e}")
+            return Response(
+                {"error": str(e)},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        except Exception as e:
+            logger.error(f"Unexpected error parsing email: {e}", exc_info=True)
+            return Response(
+                {"error": "Failed to parse email. Please try again or check the format."},
+                status=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            )
+
+
+class GmailWatchWebhookView(APIView):
+    """
+    Webhook endpoint for Gmail push notifications from Google Cloud Pub/Sub.
+
+    POST /api/gmail/webhook/
+    Receives notifications when new emails arrive and processes calendar-related ones.
+    """
+    permission_classes = [AllowAny]  # Google Pub/Sub doesn't use user auth
+
+    def post(self, request):
+        """
+        Handle incoming Gmail push notification.
+
+        Google sends notifications in this format:
+        {
+          "message": {
+            "data": "base64-encoded-data",
+            "messageId": "...",
+            "publishTime": "..."
+          },
+          "subscription": "..."
+        }
+        """
+        try:
+            import base64
+            import json
+            from .gmail_integration import process_new_messages, get_message_content, is_calendar_related
+            from .email_parser import parse_email_to_event
+
+            # Extract message from Pub/Sub payload
+            message_data = request.data.get("message", {})
+            encoded_data = message_data.get("data", "")
+
+            if not encoded_data:
+                logger.warning("Received Gmail webhook with no data")
+                return Response({"status": "ignored"}, status=status.HTTP_200_OK)
+
+            # Decode the Pub/Sub message
+            decoded_data = base64.b64decode(encoded_data).decode("utf-8")
+            notification = json.loads(decoded_data)
+
+            email_address = notification.get("emailAddress")
+            history_id = notification.get("historyId")
+
+            if not email_address or not history_id:
+                logger.warning("Gmail webhook missing required fields")
+                return Response({"status": "ignored"}, status=status.HTTP_200_OK)
+
+            # Find the Google account by email
+            try:
+                account = GoogleAccount.objects.get(email=email_address)
+            except GoogleAccount.DoesNotExist:
+                logger.warning(f"No GoogleAccount found for email: {email_address}")
+                return Response({"status": "ignored"}, status=status.HTTP_200_OK)
+
+            # Process new messages since the last history ID
+            logger.info(f"Processing Gmail notification for {email_address}, historyId: {history_id}")
+
+            # Fetch and filter calendar-related messages
+            from .gmail_integration import build_gmail_service
+
+            service = build_gmail_service(account)
+            calendar_emails = []
+
+            try:
+                # Get the latest message from inbox to check
+                messages_response = service.users().messages().list(
+                    userId="me",
+                    labelIds=["INBOX"],
+                    maxResults=5  # Check recent messages
+                ).execute()
+
+                messages = messages_response.get("messages", [])
+
+                for msg in messages:
+                    message_id = msg.get("id")
+                    if not message_id:
+                        continue
+
+                    # Fetch message content
+                    from .gmail_integration import get_message_content, is_calendar_related
+
+                    content = get_message_content(service, message_id)
+
+                    if content and is_calendar_related(content):
+                        logger.info(f"Found calendar-related email: {message_id}")
+
+                        # Parse email with AI
+                        try:
+                            event_data = parse_email_to_event(content)
+
+                            # Create the event
+                            event = Event.objects.create(
+                                pilot=account.user,
+                                source=Event.Source.LOCAL,
+                                title=event_data["title"],
+                                start=event_data["start"],
+                                end=event_data["end"],
+                                description=event_data.get("description", ""),
+                                all_day=event_data.get("all_day", False),
+                            )
+
+                            # Create notification
+                            create_notification(
+                                user=account.user,
+                                type=Notification.Type.EVENT_CREATED,
+                                title=f"Auto-created: {event.title}",
+                                message=f"Gmail detected a calendar invitation and automatically created an event",
+                                data={
+                                    "event_id": event.pk,
+                                    "action": "auto_parsed_from_gmail",
+                                    "start": event.start.isoformat(),
+                                    "message_id": message_id,
+                                },
+                                event=event,
+                            )
+
+                            logger.info(f"Auto-created event {event.pk} from Gmail message {message_id}")
+                            calendar_emails.append(message_id)
+
+                        except Exception as e:
+                            logger.warning(f"Failed to parse calendar email {message_id}: {e}")
+
+            except Exception as e:
+                logger.error(f"Error processing Gmail messages: {e}", exc_info=True)
+
+            return Response({
+                "status": "processed",
+                "events_created": len(calendar_emails)
+            }, status=status.HTTP_200_OK)
+
+        except Exception as e:
+            logger.error(f"Error handling Gmail webhook: {e}", exc_info=True)
+            return Response({"status": "error"}, status=status.HTTP_200_OK)
+
+
+class GmailWatchManageView(APIView):
+    """
+    Manage Gmail watch subscription for automatic email monitoring.
+
+    GET /api/gmail/watch/ - Get watch status
+    POST /api/gmail/watch/ - Start watching Gmail
+    DELETE /api/gmail/watch/ - Stop watching Gmail
+    """
+    permission_classes = [IsAuthenticated]
+
+    def get(self, request):
+        """Get current Gmail watch status."""
+        try:
+            account = request.user.google_account
+        except GoogleAccount.DoesNotExist:
+            return Response(
+                {"error": "Google Calendar not connected"},
+                status=status.HTTP_404_NOT_FOUND,
+            )
+
+        from .gmail_integration import get_watch_status
+
+        watch_status = get_watch_status(account)
+        return Response(watch_status)
+
+    def post(self, request):
+        """Start Gmail watch subscription."""
+        try:
+            account = request.user.google_account
+        except GoogleAccount.DoesNotExist:
+            return Response(
+                {"error": "Google Calendar not connected. Please connect first."},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        # Check if user has Gmail scope
+        if "gmail" not in account.scopes.lower():
+            return Response(
+                {
+                    "error": "Gmail access not authorized. Please reconnect your Google account to enable Gmail monitoring."
+                },
+                status=status.HTTP_403_FORBIDDEN,
+            )
+
+        try:
+            from .gmail_integration import start_gmail_watch
+
+            watch_data = start_gmail_watch(account)
+
+            create_notification(
+                user=request.user,
+                type=Notification.Type.EVENT_CREATED,
+                title="Gmail monitoring enabled",
+                message="V-Cal will now automatically create events from calendar-related emails",
+                data={
+                    "action": "gmail_watch_started",
+                    "expires_at": watch_data["expires_at"].isoformat(),
+                },
+            )
+
+            return Response({
+                "message": "Gmail monitoring started successfully",
+                "watch": watch_data,
+            }, status=status.HTTP_201_CREATED)
+
+        except Exception as e:
+            logger.error(f"Failed to start Gmail watch: {e}", exc_info=True)
+            return Response(
+                {"error": f"Failed to start Gmail monitoring: {str(e)}"},
+                status=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            )
+
+    def delete(self, request):
+        """Stop Gmail watch subscription."""
+        try:
+            account = request.user.google_account
+        except GoogleAccount.DoesNotExist:
+            return Response(
+                {"error": "Google Calendar not connected"},
+                status=status.HTTP_404_NOT_FOUND,
+            )
+
+        try:
+            from .gmail_integration import stop_gmail_watch
+
+            stop_gmail_watch(account)
+
+            create_notification(
+                user=request.user,
+                type=Notification.Type.EVENT_UPDATED,
+                title="Gmail monitoring disabled",
+                message="V-Cal is no longer monitoring your Gmail for calendar invitations",
+                data={"action": "gmail_watch_stopped"},
+            )
+
+            return Response({
+                "message": "Gmail monitoring stopped successfully"
+            }, status=status.HTTP_200_OK)
+
+        except Exception as e:
+            logger.error(f"Failed to stop Gmail watch: {e}", exc_info=True)
+            return Response(
+                {"error": f"Failed to stop Gmail monitoring: {str(e)}"},
+                status=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            )

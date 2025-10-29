@@ -18,3 +18,4 @@ icalendar
 requests
 celery[redis]
 redis
+groq

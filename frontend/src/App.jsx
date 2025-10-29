@@ -4,6 +4,7 @@ import Login from "./pages/Login";
 import Register from "./pages/Register";
 import Dashboard from "./pages/Dashboard";
 import Calendar from "./pages/Calendar";
+import EmailParser from "./pages/EmailParser";
 import NotFound from "./pages/NotFound";
 import ProtectedRoute from "./components/ProtectedRoute";
 
@@ -36,6 +37,14 @@ function App() {
           element={
             <ProtectedRoute>
               <Calendar />
+            </ProtectedRoute>
+          }
+        />
+        <Route
+          path="/parse-email"
+          element={
+            <ProtectedRoute>
+              <EmailParser />
             </ProtectedRoute>
           }
         />

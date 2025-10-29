@@ -85,4 +85,6 @@ reports/
 # --- Misc ---
 *.bak
 *.tmp
+CLAUDE.md
+.claude/
 
