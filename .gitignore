@@ -36,6 +36,7 @@ local_settings.py
 **/.env
 **/.env.*      # .env.local, .env.development, etc.
 !.env.example  # keep example template if you have one
+GMAIL_AUTO_PARSE_SETUP.md  # Gmail API setup documentation (may contain sensitive info)
 
 # --- Virtual environments ---
 .env/
