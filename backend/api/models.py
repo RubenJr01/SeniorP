@@ -82,6 +82,20 @@ class Event(models.Model):
     self.full_clean()
     return super().save(*args, **kwargs)
 
+  @property
+  def urgency_color(self):
+    if not self.start:
+        return "green"  
+    now = timezone.now()
+    time_left = self.start - now
+
+    if time_left > timezone.timedelta(days=2):
+        return "green"
+    elif time_left > timezone.timedelta(days=1):
+        return "yellow"
+    else:
+        return "red"
+
   class Meta:
     constraints = [
       models.CheckConstraint(
@@ -167,6 +181,7 @@ class GoogleAccount(models.Model):
 
   def __str__(self):
     return f"{self.user.username} ({self.email})"
+
 
   class Meta:
     unique_together = (("user", "google_user_id"),)

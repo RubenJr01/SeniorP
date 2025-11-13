@@ -145,6 +145,24 @@
   gap: 0.35rem;
 }
 
+.calendar-event.low-urgency {
+  background: rgba(34, 197, 94, 0.25); /* green */
+  color: #166534;
+  box-shadow: 0 10px 20px rgba(34, 197, 94, 0.25);
+}
+
+.calendar-event.medium-urgency {
+  background: rgba(234, 179, 8, 0.25); /* yellow */
+  color: #92400e;
+  box-shadow: 0 10px 20px rgba(234, 179, 8, 0.25);
+}
+
+.calendar-event.high-urgency {
+  background: rgba(239, 68, 68, 0.25); /* red */
+  color: #991b1b;
+  box-shadow: 0 10px 20px rgba(239, 68, 68, 0.25);
+}
+
 .calendar-event__time {
   font-size: 0.85rem;
   color: var(--text-secondary);
@@ -330,4 +348,28 @@
   .calendar-day {
     min-height: 140px;
   }
+.calendar-event.green {
+  background: rgba(34, 197, 94, 0.25); /* Green */
+  color: #065f46;
+  border: 1px solid #16a34a;
+}
+
+.calendar-event.yellow {
+  background: rgba(250, 204, 21, 0.25); /* Yellow */
+  color: #92400e;
+  border: 1px solid #eab308;
+}
+
+.calendar-event.red {
+  background: rgba(239, 68, 68, 0.25); /* Red */
+  color: #7f1d1d;
+  border: 1px solid #ef4444;
+}
+
+/* Emoji styling */
+.calendar-event__emoji {
+  font-size: 1.3rem;
+  margin-right: 0.4rem;
+  vertical-align: middle;
+}
 }
