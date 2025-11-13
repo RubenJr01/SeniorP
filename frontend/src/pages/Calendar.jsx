@@ -415,7 +415,13 @@ function Calendar() {
                 <div className="calendar-day__events">
                   {cell.events.length > 0 &&
                     cell.events.slice(0, 3).map((event) => (
-                      <div className="calendar-event" key={event.occurrence_id}>
+                      <div className={'calendar-event ${event.urgency_color || "green"}'} key={event.id}>
+                        
+                        <span className="calendar-event__emoji">
+                          {event.urgency_color === "green" && "😊"}
+                          {event.urgency_color === "yellow" && "😢"}
+                          {event.urgency_color === "red" && "😡"}
+                        </span>
                         <span>{event.title}</span>
                         <span className="calendar-event__time">
                           {new Date(event.start).toLocaleTimeString([], {

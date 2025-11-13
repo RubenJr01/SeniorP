@@ -82,6 +82,18 @@ class EventSerializer(serializers.ModelSerializer):
     # Show the pilot's username
     pilot_username = serializers.CharField(source="pilot.username", read_only=True)
     attendees = EventAttendeeSerializer(many=True, required=False)
+    urgency_color = serializers.SerializerMethodField()
+
+    def get_urgency_color(self, obj):
+        now = timezone.now()
+        time_diff = obj.start - now
+        if time_diff.total_seconds() > 2 * 24 * 3600:
+            return "green"   # More than 2 days
+        elif time_diff.total_seconds() > 24 * 3600:
+            return "yellow"  # Less than 2 days
+        else:
+            return "red"
+
 
     class Meta:
         model = Event
@@ -282,6 +294,7 @@ class InvitationSerializer(serializers.ModelSerializer):
             "created_at",
             "updated_at",
             "invite_url",
+            "urgency_color",
         )
         read_only_fields = (
             "id",
