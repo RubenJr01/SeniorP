@@ -1,4 +1,5 @@
 import { useMemo, useState } from "react";
+import EmojiPicker from "emoji-picker-react";
 import api from "../api";
 import "../styles/DayView.css";
 
@@ -25,6 +26,7 @@ function DayView({ date, events, onClose, onCreateEvent, onEventUpdated }) {
   const [editForm, setEditForm] = useState({});
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState("");
+  const [showEmojiPicker, setShowEmojiPicker] = useState(false);
   const dateString = useMemo(() => {
     const d = new Date(date);
     return d.toLocaleDateString(undefined, {
@@ -55,15 +57,21 @@ function DayView({ date, events, onClose, onCreateEvent, onEventUpdated }) {
         minute: "2-digit",
       });
 
-      // Color based on event source
-      const colorClass =
-        event.source === "google"
-          ? "day-view-event--google"
-          : event.source === "brightspace"
-          ? "day-view-event--brightspace"
-          : event.recurrence_frequency && event.recurrence_frequency !== "none"
-          ? "day-view-event--recurring"
-          : "day-view-event--default";
+      // Color based on urgency, then event source
+      let colorClass;
+      if (event.urgency_color === "red") {
+        colorClass = "day-view-event--urgent";
+      } else if (event.urgency_color === "yellow") {
+        colorClass = "day-view-event--soon";
+      } else if (event.source === "google") {
+        colorClass = "day-view-event--google";
+      } else if (event.source === "brightspace") {
+        colorClass = "day-view-event--brightspace";
+      } else if (event.recurrence_frequency && event.recurrence_frequency !== "none") {
+        colorClass = "day-view-event--recurring";
+      } else {
+        colorClass = "day-view-event--default";
+      }
 
       return {
         ...event,
@@ -87,14 +95,17 @@ function DayView({ date, events, onClose, onCreateEvent, onEventUpdated }) {
       start: new Date(event.start).toISOString().slice(0, 16),
       end: new Date(event.end).toISOString().slice(0, 16),
       all_day: event.all_day || false,
+      emoji: event.emoji || "",
     });
     setError("");
+    setShowEmojiPicker(false);
   };
 
   const handleCloseEdit = () => {
     setEditingEvent(null);
     setEditForm({});
     setError("");
+    setShowEmojiPicker(false);
   };
 
   const handleEditChange = (e) => {
@@ -117,9 +128,11 @@ function DayView({ date, events, onClose, onCreateEvent, onEventUpdated }) {
         start: new Date(editForm.start).toISOString(),
         end: new Date(editForm.end).toISOString(),
         all_day: editForm.all_day,
+        emoji: editForm.emoji || "",
       };
 
-      await api.patch(`/api/events/${editingEvent.id}/`, payload);
+      const eventId = editingEvent.event_id || editingEvent.id;
+      await api.patch(`/api/events/${eventId}/`, payload);
 
       handleCloseEdit();
       if (onEventUpdated) {
@@ -142,7 +155,8 @@ function DayView({ date, events, onClose, onCreateEvent, onEventUpdated }) {
     setError("");
 
     try {
-      await api.delete(`/api/events/${editingEvent.id}/`);
+      const eventId = editingEvent.event_id || editingEvent.id;
+      await api.delete(`/api/events/${eventId}/`);
       handleCloseEdit();
       if (onEventUpdated) {
         onEventUpdated();
@@ -217,7 +231,14 @@ function DayView({ date, events, onClose, onCreateEvent, onEventUpdated }) {
                   onClick={() => handleEventClick(bar)}
                 >
                   <div className="day-view-event-content">
-                    <strong className="day-view-event-title">{bar.title}</strong>
+                    <strong className="day-view-event-title">
+                      {bar.emoji ? `${bar.emoji} ` : (
+                        bar.urgency_color === "red" ? "😡 " :
+                        bar.urgency_color === "yellow" ? "😢 " :
+                        bar.urgency_color === "green" ? "😊 " : ""
+                      )}
+                      {bar.title}
+                    </strong>
                     <span className="day-view-event-time">
                       {bar.startTime} - {bar.endTime}
                     </span>
@@ -280,6 +301,46 @@ function DayView({ date, events, onClose, onCreateEvent, onEventUpdated }) {
                   disabled={saving}
                 />
               </label>
+
+              <div>
+                <span style={{ display: "block", marginBottom: "0.5rem", fontWeight: 600, color: "var(--text-primary)", fontSize: "0.9rem" }}>Emoji (optional)</span>
+                <div className="emoji-selector">
+                  <button
+                    type="button"
+                    className="emoji-selector-btn"
+                    onClick={() => setShowEmojiPicker(!showEmojiPicker)}
+                    disabled={saving}
+                  >
+                    {editForm.emoji || "😊"} Choose Emoji
+                  </button>
+                  {showEmojiPicker && (
+                    <div className="emoji-picker-wrapper">
+                      <EmojiPicker
+                        onEmojiClick={(emojiData) => {
+                          setEditForm({ ...editForm, emoji: emojiData.emoji });
+                          setShowEmojiPicker(false);
+                        }}
+                        autoFocusSearch={false}
+                        theme="light"
+                        height={350}
+                        width="100%"
+                        emojiStyle="twitter"
+                        previewConfig={{ showPreview: false }}
+                      />
+                    </div>
+                  )}
+                  {editForm.emoji && (
+                    <button
+                      type="button"
+                      className="emoji-clear-btn"
+                      onClick={() => setEditForm({ ...editForm, emoji: "" })}
+                      disabled={saving}
+                    >
+                      Clear
+                    </button>
+                  )}
+                </div>
+              </div>
 
               {!editForm.all_day && (
                 <>

@@ -287,6 +287,29 @@
   border-color: rgba(251, 191, 36, 0.45);
 }
 
+/* Urgency Colors */
+.day-view-event--urgent {
+  background: rgba(239, 68, 68, 0.25);
+  border: 1px solid #ef4444;
+  color: #7f1d1d;
+}
+
+.day-view-event--urgent:hover {
+  background: rgba(239, 68, 68, 0.32);
+  border-color: #dc2626;
+}
+
+.day-view-event--soon {
+  background: rgba(250, 204, 21, 0.25);
+  border: 1px solid #eab308;
+  color: #92400e;
+}
+
+.day-view-event--soon:hover {
+  background: rgba(250, 204, 21, 0.32);
+  border-color: #ca8a04;
+}
+
 /* Event Content */
 .day-view-event-content {
   display: flex;

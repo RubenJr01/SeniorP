@@ -104,6 +104,7 @@ class EventSerializer(serializers.ModelSerializer):
             "start",
             "end",
             "all_day",
+            "emoji",
             "recurrence_frequency",
             "recurrence_interval",
             "recurrence_count",
@@ -114,6 +115,7 @@ class EventSerializer(serializers.ModelSerializer):
             "created_at",
             "updated_at",
             "attendees",
+            "urgency_color",
         )
 
         read_only_fields = (
@@ -123,9 +125,11 @@ class EventSerializer(serializers.ModelSerializer):
             "source",
             "created_at",
             "updated_at",
+            "urgency_color",
         )
         extra_kwargs = {
             "description": {"required": False, "allow_blank": True},
+            "emoji": {"required": False, "allow_blank": True},
             "recurrence_count": {"required": False, "allow_null": True},
             "recurrence_end_date": {"required": False, "allow_null": True},
         }

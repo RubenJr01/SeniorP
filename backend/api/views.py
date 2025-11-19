@@ -299,6 +299,7 @@ class EventOccurrencesView(APIView):
                             "start": event.start,
                             "end": event.end,
                             "all_day": event.all_day,
+                            "emoji": event.emoji,
                             "source": event.source,
                             "is_recurring": False,
                             "recurrence_frequency": event.recurrence_frequency,
@@ -306,6 +307,7 @@ class EventOccurrencesView(APIView):
                             "attendees": attendees_payload,
                             "self_response_status": self_response_status,
                             "can_rsvp": can_rsvp,
+                            "urgency_color": event.urgency_color,
                         }
                     )
                 continue
@@ -335,6 +337,15 @@ class EventOccurrencesView(APIView):
             generated = 0
             for occurrence_start in rule.between(window_start, window_end, inc=True):
                 occurrence_end = occurrence_start + event_duration
+                # Calculate urgency color for this specific occurrence
+                time_diff = occurrence_start - now
+                if time_diff.total_seconds() > 2 * 24 * 3600:
+                    urgency = "green"
+                elif time_diff.total_seconds() > 24 * 3600:
+                    urgency = "yellow"
+                else:
+                    urgency = "red"
+
                 occurrences.append(
                     {
                         "event_id": event.id,
@@ -344,6 +355,7 @@ class EventOccurrencesView(APIView):
                         "start": occurrence_start,
                         "end": occurrence_end,
                         "all_day": event.all_day,
+                        "emoji": event.emoji,
                         "source": event.source,
                         "is_recurring": True,
                         "recurrence_frequency": event.recurrence_frequency,
@@ -351,6 +363,7 @@ class EventOccurrencesView(APIView):
                         "attendees": attendees_payload,
                         "self_response_status": self_response_status,
                         "can_rsvp": can_rsvp,
+                        "urgency_color": urgency,
                     }
                 )
                 generated += 1

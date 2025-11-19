@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import Navigation from "../components/Navigation";
 import DayView from "../components/DayView";
+import EmojiPicker from "emoji-picker-react";
 import api from "../api";
 import "../styles/Calendar.css";
 
@@ -35,6 +36,7 @@ function createInitialForm(baseDate = new Date()) {
     endDateTime: isoLocal(end),
     startDate: isoDate(start),
     all_day: false,
+    emoji: "",
     recurrence_enabled: false,
     recurrence_frequency: "weekly",
     recurrence_interval: 1,
@@ -104,6 +106,7 @@ function Calendar() {
   const [formError, setFormError] = useState("");
   const [isDayViewOpen, setIsDayViewOpen] = useState(false);
   const [selectedDayCell, setSelectedDayCell] = useState(null);
+  const [showEmojiPicker, setShowEmojiPicker] = useState(false);
 
   const currentMonthKey = useMemo(() => getMonthKey(referenceDate), [referenceDate]);
 
@@ -335,6 +338,7 @@ function Calendar() {
       title: form.title.trim(),
       description: form.description.trim(),
       all_day: !!form.all_day,
+      emoji: form.emoji || "",
       start: startDateValue.toISOString(),
       end: endDateValue.toISOString(),
       recurrence_frequency: isRecurring ? form.recurrence_frequency : "none",
@@ -415,12 +419,14 @@ function Calendar() {
                 <div className="calendar-day__events">
                   {cell.events.length > 0 &&
                     cell.events.slice(0, 3).map((event) => (
-                      <div className={'calendar-event ${event.urgency_color || "green"}'} key={event.id}>
-                        
+                      <div className={`calendar-event ${event.urgency_color || "green"}`} key={event.id}>
+
                         <span className="calendar-event__emoji">
-                          {event.urgency_color === "green" && "😊"}
-                          {event.urgency_color === "yellow" && "😢"}
-                          {event.urgency_color === "red" && "😡"}
+                          {event.emoji || (
+                            event.urgency_color === "green" ? "😊" :
+                            event.urgency_color === "yellow" ? "😢" :
+                            event.urgency_color === "red" ? "😡" : "😊"
+                          )}
                         </span>
                         <span>{event.title}</span>
                         <span className="calendar-event__time">
@@ -493,6 +499,43 @@ function Calendar() {
                   rows={3}
                 />
               </label>
+              <div className="calendar-modal-label">
+                <span>Emoji (optional)</span>
+                <div className="emoji-selector">
+                  <button
+                    type="button"
+                    className="emoji-selector-btn"
+                    onClick={() => setShowEmojiPicker(!showEmojiPicker)}
+                  >
+                    {form.emoji || "😊"} Choose Emoji
+                  </button>
+                  {showEmojiPicker && (
+                    <div className="emoji-picker-wrapper">
+                      <EmojiPicker
+                        onEmojiClick={(emojiData) => {
+                          setForm({ ...form, emoji: emojiData.emoji });
+                          setShowEmojiPicker(false);
+                        }}
+                        autoFocusSearch={false}
+                        theme="light"
+                        height={350}
+                        width="100%"
+                        emojiStyle="twitter"
+                        previewConfig={{ showPreview: false }}
+                      />
+                    </div>
+                  )}
+                  {form.emoji && (
+                    <button
+                      type="button"
+                      className="emoji-clear-btn"
+                      onClick={() => setForm({ ...form, emoji: "" })}
+                    >
+                      Clear
+                    </button>
+                  )}
+                </div>
+              </div>
               <label className="calendar-modal-label">
                 <span>Invite attendees</span>
                 <textarea

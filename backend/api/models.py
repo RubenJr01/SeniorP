@@ -27,6 +27,7 @@ class Event(models.Model):
   start = models.DateTimeField()
   end = models.DateTimeField()
   all_day = models.BooleanField(default=False)
+  emoji = models.CharField(max_length=10, blank=True, default="")
   recurrence_frequency = models.CharField(
     max_length=10,
     choices=RecurrenceFrequency.choices,
