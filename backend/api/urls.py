@@ -13,6 +13,7 @@ from .views import (
     InvitationViewSet,
     InvitationLookupView,
     ParseEmailView,
+    ParsedEmailViewSet,
     GmailWatchWebhookView,
     GmailWatchManageView,
 )
@@ -20,6 +21,7 @@ from .views import (
 router = DefaultRouter()
 router.register(r"events", EventViewSet, basename="event")
 router.register(r"invitations", InvitationViewSet, basename="invitation")
+router.register(r"parsed-emails", ParsedEmailViewSet, basename="parsed-email")
 
 urlpatterns = [
     path("events/occurrences/", EventOccurrencesView.as_view(), name="event-occurrences"),

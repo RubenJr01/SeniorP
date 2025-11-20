@@ -3,7 +3,7 @@ from django.contrib.auth.models import User
 from django.utils import timezone
 from rest_framework import serializers
 
-from .models import Event, EventAttendee, Invitation, Notification
+from .models import Event, EventAttendee, Invitation, Notification, ParsedEmail
 
 class UserSerializer(serializers.ModelSerializer):
     # Register a new user with a hashed password
@@ -104,6 +104,7 @@ class EventSerializer(serializers.ModelSerializer):
             "start",
             "end",
             "all_day",
+            "location",
             "emoji",
             "recurrence_frequency",
             "recurrence_interval",
@@ -129,6 +130,7 @@ class EventSerializer(serializers.ModelSerializer):
         )
         extra_kwargs = {
             "description": {"required": False, "allow_blank": True},
+            "location": {"required": False, "allow_blank": True},
             "emoji": {"required": False, "allow_blank": True},
             "recurrence_count": {"required": False, "allow_null": True},
             "recurrence_end_date": {"required": False, "allow_null": True},
@@ -237,6 +239,8 @@ class EventOccurrenceSerializer(serializers.Serializer):
     start = serializers.DateTimeField()
     end = serializers.DateTimeField()
     all_day = serializers.BooleanField()
+    emoji = serializers.CharField(allow_blank=True, required=False)
+    location = serializers.CharField(allow_blank=True, required=False)
     source = serializers.CharField()
     is_recurring = serializers.BooleanField()
     recurrence_frequency = serializers.CharField()
@@ -251,6 +255,7 @@ class EventOccurrenceSerializer(serializers.Serializer):
         allow_blank=True,
     )
     can_rsvp = serializers.BooleanField(required=False)
+    urgency_color = serializers.CharField(required=False)
 
 
 class BrightspaceImportSerializer(serializers.Serializer):
@@ -321,3 +326,36 @@ class InvitationSerializer(serializers.ModelSerializer):
     def get_invite_url(self, invitation):
         base_url = settings.FRONTEND_APP_URL.rstrip("/")
         return f"{base_url}/register?invite={invitation.token}"
+
+
+class ParsedEmailSerializer(serializers.ModelSerializer):
+    """Serializer for AI-parsed email events awaiting user review."""
+    user_id = serializers.IntegerField(source="user.id", read_only=True)
+    username = serializers.CharField(source="user.username", read_only=True)
+    created_event_id = serializers.IntegerField(source="created_event.id", read_only=True)
+
+    class Meta:
+        model = ParsedEmail
+        fields = (
+            "id",
+            "user_id",
+            "username",
+            "message_id",
+            "subject",
+            "email_body",
+            "sender",
+            "parsed_data",
+            "status",
+            "created_event_id",
+            "parsed_at",
+            "reviewed_at",
+        )
+        read_only_fields = (
+            "id",
+            "user_id",
+            "username",
+            "message_id",
+            "created_event_id",
+            "parsed_at",
+            "reviewed_at",
+        )

@@ -47,6 +47,7 @@ export default function Dashboard() {
   const [gmailWatchActive, setGmailWatchActive] = useState(false);
   const [gmailWatchWorking, setGmailWatchWorking] = useState(false);
   const [gmailWatchMessage, setGmailWatchMessage] = useState("");
+  const [pendingEmailsCount, setPendingEmailsCount] = useState(0);
   const [gmailWatchExpiry, setGmailWatchExpiry] = useState(null);
   const [rsvpWorking, setRsvpWorking] = useState(null);
   const [rsvpMessage, setRsvpMessage] = useState(null);
@@ -95,6 +96,15 @@ export default function Dashboard() {
     }
   }, [googleStatus.connected]);
 
+  const loadPendingEmailsCount = useCallback(async () => {
+    try {
+      const { data } = await api.get("/api/parsed-emails/?status=pending");
+      setPendingEmailsCount(data.length);
+    } catch {
+      setPendingEmailsCount(0);
+    }
+  }, []);
+
   useEffect(() => {
     fetchOccurrences();
   }, [fetchOccurrences]);
@@ -106,6 +116,10 @@ export default function Dashboard() {
   useEffect(() => {
     loadGmailWatchStatus();
   }, [loadGmailWatchStatus]);
+
+  useEffect(() => {
+    loadPendingEmailsCount();
+  }, [loadPendingEmailsCount]);
 
   useEffect(() => {
     const params = new URLSearchParams(location.search);
@@ -533,7 +547,7 @@ export default function Dashboard() {
               gmailWatchActive ? (
                 <>
                   <span className="dashboard-stat-value">Active</span>
-                  <p>Automatically creating events from calendar emails</p>
+                  <p>Automatically finding calendar emails for review</p>
                 </>
               ) : (
                 <>
@@ -546,6 +560,15 @@ export default function Dashboard() {
                 <span className="dashboard-stat-value">—</span>
                 <p>Connect Google Calendar to enable</p>
               </>
+            )}
+            {pendingEmailsCount > 0 && (
+              <button
+                onClick={() => window.location.href = "/pending-events"}
+                className="dashboard-sync-btn"
+                style={{ marginTop: "0.5rem", background: "#f59e0b", border: "none" }}
+              >
+                📬 Review {pendingEmailsCount} pending event{pendingEmailsCount !== 1 ? "s" : ""}
+              </button>
             )}
           </article>
           <article className="dashboard-stat">

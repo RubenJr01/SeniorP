@@ -212,12 +212,12 @@ function Navigation() {
           )}
           {isAuthenticated && (
             <NavLink
-              to="/parse-email"
+              to="/pending-events"
               className={({ isActive }) =>
                 `app-nav__link ${isActive ? "app-nav__link--active" : ""}`
               }
             >
-              📧 Parse Email
+              📬 Pending Events
             </NavLink>
           )}
           {!isAuthenticated && (

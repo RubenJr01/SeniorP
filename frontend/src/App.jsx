@@ -4,7 +4,7 @@ import Login from "./pages/Login";
 import Register from "./pages/Register";
 import Dashboard from "./pages/Dashboard";
 import Calendar from "./pages/Calendar";
-import EmailParser from "./pages/EmailParser";
+import PendingEvents from "./pages/PendingEvents";
 import NotFound from "./pages/NotFound";
 import ProtectedRoute from "./components/ProtectedRoute";
 
@@ -41,10 +41,10 @@ function App() {
           }
         />
         <Route
-          path="/parse-email"
+          path="/pending-events"
           element={
             <ProtectedRoute>
-              <EmailParser />
+              <PendingEvents />
             </ProtectedRoute>
           }
         />

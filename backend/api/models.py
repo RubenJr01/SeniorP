@@ -27,6 +27,7 @@ class Event(models.Model):
   start = models.DateTimeField()
   end = models.DateTimeField()
   all_day = models.BooleanField(default=False)
+  location = models.CharField(max_length=500, blank=True, default="")
   emoji = models.CharField(max_length=10, blank=True, default="")
   recurrence_frequency = models.CharField(
     max_length=10,
@@ -236,6 +237,63 @@ class Notification(models.Model):
 
   class Meta:
     ordering = ["-created_at"]
+
+
+class ParsedEmail(models.Model):
+  """Stores AI-parsed email data for user review before event creation."""
+  class Status(models.TextChoices):
+    PENDING = "pending", "Pending Review"
+    APPROVED = "approved", "Approved"
+    REJECTED = "rejected", "Rejected"
+
+  user = models.ForeignKey(
+    User,
+    on_delete=models.CASCADE,
+    related_name="parsed_emails",
+  )
+  message_id = models.CharField(max_length=255)  # Gmail message ID for deduplication
+  subject = models.CharField(max_length=500)
+  email_body = models.TextField()
+  sender = models.EmailField(blank=True)
+
+  # AI-parsed event data (stored as JSON for flexibility)
+  parsed_data = models.JSONField(default=dict)
+
+  # Status tracking
+  status = models.CharField(
+    max_length=20,
+    choices=Status.choices,
+    default=Status.PENDING,
+  )
+
+  # If approved, link to the created event
+  created_event = models.ForeignKey(
+    Event,
+    on_delete=models.SET_NULL,
+    null=True,
+    blank=True,
+    related_name="parsed_from_email",
+  )
+
+  # Tracking
+  parsed_at = models.DateTimeField(auto_now_add=True)
+  reviewed_at = models.DateTimeField(null=True, blank=True)
+
+  def __str__(self):
+    return f"ParsedEmail({self.subject} - {self.status})"
+
+  class Meta:
+    ordering = ["-parsed_at"]
+    constraints = [
+      models.UniqueConstraint(
+        fields=["user", "message_id"],
+        name="unique_parsed_email_per_user",
+      ),
+    ]
+    indexes = [
+      models.Index(fields=["user", "status"]),
+      models.Index(fields=["user", "message_id"]),
+    ]
 
 
 class Invitation(models.Model):

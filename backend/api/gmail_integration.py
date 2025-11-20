@@ -164,6 +164,48 @@ def get_message_content(service, message_id: str, user_id: str = "me") -> Option
         return None
 
 
+def get_message_details(service, message_id: str, user_id: str = "me") -> Optional[Dict]:
+    """
+    Fetch full details of a Gmail message including headers and content.
+
+    Returns dict with 'id', 'subject', 'sender', 'content', or None if not found.
+    """
+    try:
+        message = service.users().messages().get(
+            userId=user_id,
+            id=message_id,
+            format="full"
+        ).execute()
+
+        payload = message.get("payload", {})
+        headers = payload.get("headers", [])
+
+        # Extract subject and sender from headers
+        subject = ""
+        sender = ""
+        for header in headers:
+            name = header.get("name", "").lower()
+            value = header.get("value", "")
+            if name == "subject":
+                subject = value
+            elif name == "from":
+                sender = value
+
+        # Extract email body
+        content = _extract_text_from_payload(payload) or ""
+
+        return {
+            "id": message_id,
+            "subject": subject,
+            "sender": sender,
+            "content": content
+        }
+
+    except HttpError as exc:
+        logger.error(f"Failed to fetch message details {message_id}: {exc}")
+        return None
+
+
 def _extract_text_from_payload(payload: Dict) -> Optional[str]:
     """Extract plain text from email payload (handles multipart)."""
     # Check for plain text in body
@@ -263,11 +305,12 @@ def list_recent_messages(account: GoogleAccount, max_results: int = 10) -> List[
         raise GmailError(f"Failed to list messages: {exc}") from exc
 
 
-def process_new_messages(account: GoogleAccount, history_id: str) -> List[Tuple[str, str]]:
+def process_new_messages(account: GoogleAccount, history_id: str) -> List[Dict]:
     """
     Process new messages since the given history ID.
 
-    Returns list of (message_id, content) tuples for calendar-related emails.
+    Returns list of message details dicts for calendar-related emails.
+    Each dict contains: 'id', 'subject', 'sender', 'content'
     """
     service = build_gmail_service(account)
     calendar_emails = []
@@ -295,12 +338,16 @@ def process_new_messages(account: GoogleAccount, history_id: str) -> List[Tuple[
                 if not message_id:
                     continue
 
-                # Fetch full message content
-                content = get_message_content(service, message_id)
+                # Fetch full message details
+                message_details = get_message_details(service, message_id)
 
-                if content and is_calendar_related(content):
-                    logger.info(f"Found calendar-related email: {message_id}")
-                    calendar_emails.append((message_id, content))
+                if not message_details or not message_details.get("content"):
+                    continue
+
+                # Check if calendar-related
+                if is_calendar_related(message_details["content"]):
+                    logger.info(f"Found calendar-related email: {message_id} - {message_details.get('subject', 'No subject')}")
+                    calendar_emails.append(message_details)
 
         return calendar_emails
 

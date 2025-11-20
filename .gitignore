@@ -22,6 +22,12 @@ htmlcov/
 db.sqlite3
 *.sqlite3
 
+# Celery beat schedule
+celerybeat-schedule
+celerybeat-schedule.db
+celerybeat-schedule-shm
+celerybeat-schedule-wal
+
 # Django collectstatic & user uploads
 /staticfiles/
 staticfiles/
@@ -34,9 +40,9 @@ local_settings.py
 
 # --- Secrets & env files (any folder) ---
 **/.env
-**/.env.*      # .env.local, .env.development, etc.
-!.env.example  # keep example template if you have one
-GMAIL_AUTO_PARSE_SETUP.md  # Gmail API setup documentation (may contain sensitive info)
+**/.env.*
+!.env.example  
+
 
 # --- Virtual environments ---
 .env/

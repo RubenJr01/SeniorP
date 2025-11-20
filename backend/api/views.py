@@ -13,6 +13,8 @@ from django.conf import settings
 from django.contrib.auth.models import User
 from django.http import HttpResponseRedirect
 from django.utils import timezone
+from django.views.decorators.csrf import csrf_exempt
+from django.utils.decorators import method_decorator
 from rest_framework import generics, status, viewsets
 from rest_framework.decorators import action
 from rest_framework.permissions import AllowAny, IsAuthenticated
@@ -37,6 +39,7 @@ from .models import (
     BrightspaceFeed,
     Invitation,
     Notification,
+    ParsedEmail,
 )
 from .serializers import (
     UserSerializer,
@@ -45,6 +48,7 @@ from .serializers import (
     BrightspaceImportSerializer,
     NotificationSerializer,
     InvitationSerializer,
+    ParsedEmailSerializer,
 )
 from .notifications import create_notification
 from .invitations import send_invitation_email
@@ -300,6 +304,7 @@ class EventOccurrencesView(APIView):
                             "end": event.end,
                             "all_day": event.all_day,
                             "emoji": event.emoji,
+                            "location": event.location,
                             "source": event.source,
                             "is_recurring": False,
                             "recurrence_frequency": event.recurrence_frequency,
@@ -356,6 +361,7 @@ class EventOccurrencesView(APIView):
                         "end": occurrence_end,
                         "all_day": event.all_day,
                         "emoji": event.emoji,
+                        "location": event.location,
                         "source": event.source,
                         "is_recurring": True,
                         "recurrence_frequency": event.recurrence_frequency,
@@ -820,6 +826,161 @@ class InvitationLookupView(APIView):
         return Response(data)
 
 
+class ParsedEmailViewSet(viewsets.ModelViewSet):
+    """ViewSet for managing AI-parsed email events awaiting user review."""
+    serializer_class = ParsedEmailSerializer
+    permission_classes = [IsAuthenticated]
+    http_method_names = ["get", "post", "patch", "delete", "head"]  # Added "post" for approve/reject actions
+
+    def get_queryset(self):
+        """Return parsed emails for current user, optionally filtered by status."""
+        queryset = ParsedEmail.objects.filter(user=self.request.user).order_by("-parsed_at")
+
+        # Filter by status if provided
+        status_filter = self.request.query_params.get("status")
+        if status_filter:
+            queryset = queryset.filter(status=status_filter)
+
+        return queryset
+
+    @action(detail=True, methods=["post"])
+    def approve(self, request, pk=None):
+        """
+        Approve a parsed email and create an event from it.
+        Optionally accepts updated parsed_data in request body.
+        """
+        parsed_email = self.get_object()
+
+        if parsed_email.status != ParsedEmail.Status.PENDING:
+            return Response(
+                {"detail": "This email has already been reviewed."},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        # Allow updating parsed_data before approval
+        updated_data = request.data.get("parsed_data")
+        if updated_data:
+            parsed_email.parsed_data = updated_data
+
+        try:
+            from datetime import datetime as dt
+            event_data = parsed_email.parsed_data
+
+            # Convert ISO string datetimes back to datetime objects
+            start_dt = event_data.get("start")
+            if isinstance(start_dt, str):
+                start_dt = dt.fromisoformat(start_dt.replace('Z', '+00:00'))
+
+            end_dt = event_data.get("end")
+            if isinstance(end_dt, str):
+                end_dt = dt.fromisoformat(end_dt.replace('Z', '+00:00'))
+
+            recurrence_end_dt = event_data.get("recurrence_end_date")
+            if recurrence_end_dt and isinstance(recurrence_end_dt, str):
+                recurrence_end_dt = dt.fromisoformat(recurrence_end_dt.replace('Z', '+00:00')).date()
+
+            # Create event from parsed data
+            event = Event.objects.create(
+                pilot=request.user,
+                source=Event.Source.LOCAL,
+                title=event_data.get("title", "Untitled Event"),
+                description=event_data.get("description", ""),
+                start=start_dt,
+                end=end_dt,
+                all_day=event_data.get("all_day", False),
+                location=event_data.get("location", ""),
+                emoji=event_data.get("emoji", ""),
+                recurrence_frequency=event_data.get("recurrence_frequency", "none"),
+                recurrence_interval=event_data.get("recurrence_interval", 1),
+                recurrence_count=event_data.get("recurrence_count"),
+                recurrence_end_date=recurrence_end_dt,
+            )
+
+            # Create attendees if provided
+            attendees_data = event_data.get("attendees", [])
+            for attendee in attendees_data:
+                if isinstance(attendee, str):
+                    # Simple email string
+                    EventAttendee.objects.create(
+                        event=event,
+                        email=attendee.strip().lower(),
+                        display_name="",
+                        response_status=EventAttendee.ResponseStatus.NEEDS_ACTION,
+                    )
+                elif isinstance(attendee, dict):
+                    # Full attendee object
+                    EventAttendee.objects.create(
+                        event=event,
+                        email=attendee.get("email", "").strip().lower(),
+                        display_name=attendee.get("display_name", ""),
+                        response_status=attendee.get("response_status", EventAttendee.ResponseStatus.NEEDS_ACTION),
+                        optional=attendee.get("optional", False),
+                    )
+
+            # Update parsed email status
+            parsed_email.status = ParsedEmail.Status.APPROVED
+            parsed_email.created_event = event
+            parsed_email.reviewed_at = timezone.now()
+            parsed_email.save(update_fields=["status", "created_event", "reviewed_at", "parsed_data"])
+
+            # Create notification
+            create_notification(
+                user=request.user,
+                type=Notification.Type.EVENT_CREATED,
+                title=f"Event created: {event.title}",
+                message=f"You approved an email suggestion and created a new event",
+                data={
+                    "event_id": event.pk,
+                    "parsed_email_id": parsed_email.pk,
+                    "action": "approved_parsed_email",
+                },
+                event=event,
+            )
+
+            # Return created event
+            event_serializer = EventSerializer(event, context={"request": request})
+            return Response({
+                "message": "Event created successfully",
+                "event": event_serializer.data,
+                "parsed_email": ParsedEmailSerializer(parsed_email).data,
+            })
+
+        except Exception as e:
+            logger.error(f"Failed to create event from parsed email {pk}: {e}", exc_info=True)
+            return Response(
+                {"detail": f"Failed to create event: {str(e)}"},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+    @action(detail=True, methods=["post"])
+    def reject(self, request, pk=None):
+        """Reject a parsed email suggestion."""
+        try:
+            parsed_email = self.get_object()
+
+            if parsed_email.status != ParsedEmail.Status.PENDING:
+                return Response(
+                    {"detail": "This email has already been reviewed."},
+                    status=status.HTTP_400_BAD_REQUEST,
+                )
+
+            parsed_email.status = ParsedEmail.Status.REJECTED
+            parsed_email.reviewed_at = timezone.now()
+            parsed_email.save(update_fields=["status", "reviewed_at"])
+
+            return Response({
+                "message": "Email suggestion rejected",
+                "parsed_email": ParsedEmailSerializer(parsed_email).data,
+            })
+
+        except Exception as e:
+            logger.error(f"Failed to reject parsed email {pk}: {e}", exc_info=True)
+            return Response(
+                {"detail": f"Failed to reject: {str(e)}"},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+
 class NotificationListView(APIView):
     permission_classes = [IsAuthenticated]
 
@@ -933,6 +1094,7 @@ class ParseEmailView(APIView):
             )
 
 
+@method_decorator(csrf_exempt, name='dispatch')
 class GmailWatchWebhookView(APIView):
     """
     Webhook endpoint for Gmail push notifications from Google Cloud Pub/Sub.
@@ -959,8 +1121,10 @@ class GmailWatchWebhookView(APIView):
         try:
             import base64
             import json
-            from .gmail_integration import process_new_messages, get_message_content, is_calendar_related
+            from django.db import IntegrityError
+            from .gmail_integration import get_message_details, is_calendar_related, build_gmail_service
             from .email_parser import parse_email_to_event
+            from .models import ParsedEmail
 
             # Extract message from Pub/Sub payload
             message_data = request.data.get("message", {})
@@ -992,13 +1156,11 @@ class GmailWatchWebhookView(APIView):
             logger.info(f"Processing Gmail notification for {email_address}, historyId: {history_id}")
 
             # Fetch and filter calendar-related messages
-            from .gmail_integration import build_gmail_service
-
             service = build_gmail_service(account)
-            calendar_emails = []
+            parsed_emails_created = 0
 
             try:
-                # Get the latest message from inbox to check
+                # Get the latest messages from inbox to check
                 messages_response = service.users().messages().list(
                     userId="me",
                     labelIds=["INBOX"],
@@ -1012,46 +1174,61 @@ class GmailWatchWebhookView(APIView):
                     if not message_id:
                         continue
 
-                    # Fetch message content
-                    from .gmail_integration import get_message_content, is_calendar_related
+                    # Fetch full message details (subject, sender, content)
+                    message_details = get_message_details(service, message_id)
 
-                    content = get_message_content(service, message_id)
+                    if not message_details or not message_details.get("content"):
+                        continue
 
-                    if content and is_calendar_related(content):
-                        logger.info(f"Found calendar-related email: {message_id}")
+                    # Check if calendar-related
+                    if is_calendar_related(message_details["content"]):
+                        logger.info(f"Found calendar-related email: {message_id} - {message_details.get('subject', 'No subject')}")
 
                         # Parse email with AI
                         try:
-                            event_data = parse_email_to_event(content)
+                            event_data = parse_email_to_event(message_details["content"])
 
-                            # Create the event
-                            event = Event.objects.create(
-                                pilot=account.user,
-                                source=Event.Source.LOCAL,
-                                title=event_data["title"],
-                                start=event_data["start"],
-                                end=event_data["end"],
-                                description=event_data.get("description", ""),
-                                all_day=event_data.get("all_day", False),
-                            )
+                            # Convert datetime objects to ISO strings for JSON storage
+                            json_safe_data = {**event_data}
+                            if 'start' in json_safe_data and json_safe_data['start']:
+                                json_safe_data['start'] = json_safe_data['start'].isoformat()
+                            if 'end' in json_safe_data and json_safe_data['end']:
+                                json_safe_data['end'] = json_safe_data['end'].isoformat()
+                            if 'recurrence_end_date' in json_safe_data and json_safe_data['recurrence_end_date']:
+                                json_safe_data['recurrence_end_date'] = json_safe_data['recurrence_end_date'].isoformat()
 
-                            # Create notification
-                            create_notification(
-                                user=account.user,
-                                type=Notification.Type.EVENT_CREATED,
-                                title=f"Auto-created: {event.title}",
-                                message=f"Gmail detected a calendar invitation and automatically created an event",
-                                data={
-                                    "event_id": event.pk,
-                                    "action": "auto_parsed_from_gmail",
-                                    "start": event.start.isoformat(),
-                                    "message_id": message_id,
-                                },
-                                event=event,
-                            )
+                            # Create ParsedEmail for user review (with deduplication)
+                            try:
+                                parsed_email = ParsedEmail.objects.create(
+                                    user=account.user,
+                                    message_id=message_id,
+                                    subject=message_details.get("subject", "No subject"),
+                                    email_body=message_details.get("content", ""),
+                                    sender=message_details.get("sender", ""),
+                                    parsed_data=json_safe_data,
+                                    status=ParsedEmail.Status.PENDING,
+                                )
 
-                            logger.info(f"Auto-created event {event.pk} from Gmail message {message_id}")
-                            calendar_emails.append(message_id)
+                                # Create notification
+                                create_notification(
+                                    user=account.user,
+                                    type=Notification.Type.EVENT_CREATED,  # Reusing existing type
+                                    title=f"New event suggestion: {event_data.get('title', 'Untitled')}",
+                                    message=f"Gmail found a calendar invitation from {message_details.get('sender', 'unknown sender')}. Review and approve to add to your calendar.",
+                                    data={
+                                        "parsed_email_id": parsed_email.pk,
+                                        "action": "parsed_email_pending_review",
+                                        "subject": message_details.get("subject", ""),
+                                        "message_id": message_id,
+                                    },
+                                )
+
+                                logger.info(f"Created ParsedEmail {parsed_email.pk} from Gmail message {message_id}")
+                                parsed_emails_created += 1
+
+                            except IntegrityError:
+                                # Message already processed (deduplication)
+                                logger.info(f"Gmail message {message_id} already processed, skipping")
 
                         except Exception as e:
                             logger.warning(f"Failed to parse calendar email {message_id}: {e}")
@@ -1061,7 +1238,7 @@ class GmailWatchWebhookView(APIView):
 
             return Response({
                 "status": "processed",
-                "events_created": len(calendar_emails)
+                "parsed_emails_created": parsed_emails_created
             }, status=status.HTTP_200_OK)
 
         except Exception as e:

@@ -28,11 +28,17 @@ if not SECRET_KEY:
             "DJANGO_SECRET_KEY must be set when DJANGO_DEBUG is false."
         )
 
-# !!! EDIT THESE TWO with your real subdomains !!!
-FRONTEND_TUNNEL = "compression-olympus-discovery-layout.trycloudflare.com"
-BACKEND_TUNNEL = "filled-pmid-laboratory-throat.trycloudflare.com"
+# Cloudflare tunnel configuration
+# NOTE: These tunnel URLs change every time you restart cloudflared
+# Set them in environment variables (.env) or rely on wildcard .trycloudflare.com in DEBUG mode
+FRONTEND_TUNNEL = os.getenv("FRONTEND_TUNNEL", "")
+BACKEND_TUNNEL = os.getenv("BACKEND_TUNNEL", "")
 
-ALLOWED_HOSTS = [host for host in (BACKEND_TUNNEL, "localhost", "127.0.0.1") if host]
+# In development, accept all trycloudflare.com subdomains (tunnel URLs change on restart)
+if DEBUG:
+    ALLOWED_HOSTS = ["localhost", "127.0.0.1", ".trycloudflare.com"]
+else:
+    ALLOWED_HOSTS = [host for host in (BACKEND_TUNNEL, "localhost", "127.0.0.1") if host]
 
 # --- Apps ---
 INSTALLED_APPS = [
@@ -165,6 +171,9 @@ CSRF_TRUSTED_ORIGINS = [
     )
     if origin
 ]
+
+# Note: Gmail webhook (/api/gmail/webhook/) is exempt from CSRF via @csrf_exempt decorator
+# so changing tunnel URLs won't break webhooks
 
 # --- Celery / Redis ---
 CELERY_BROKER_URL = os.getenv("CELERY_BROKER_URL", "redis://127.0.0.1:6379/0")
