@@ -1,0 +1,194 @@
+# Cloudflared Permanent Tunnel Configuration Template
+# ==================================================
+#
+# This template configures a PERMANENT cloudflared tunnel with fixed URLs
+# instead of temporary trycloudflare.com URLs that change on every restart.
+#
+# PREREQUISITES:
+# 1. Free Cloudflare account (sign up at cloudflare.com)
+# 2. A domain registered and added to Cloudflare (DNS managed by Cloudflare)
+# 3. cloudflared CLI installed
+#
+# SETUP STEPS:
+#
+# Step 1: Login to Cloudflare (one-time)
+# ----------------------------------------
+# cloudflared tunnel login
+# (This opens a browser for authentication)
+#
+# Step 2: Create a named tunnel (one-time)
+# -----------------------------------------
+# cloudflared tunnel create vcal-tunnel
+#
+# Output will show:
+# - Tunnel UUID: 1234abcd-5678-efgh-9012-ijklmnopqrst
+# - Credentials file: ~/.cloudflared/1234abcd-5678-efgh-9012-ijklmnopqrst.json
+#
+# Copy the UUID for use below.
+#
+# Step 3: Copy this template to ~/.cloudflared/config.yml
+# ---------------------------------------------------------
+# Linux/macOS: cp cloudflared-config.yml.template ~/.cloudflared/config.yml
+# Windows: copy cloudflared-config.yml.template %USERPROFILE%\.cloudflared\config.yml
+#
+# Step 4: Edit ~/.cloudflared/config.yml
+# ----------------------------------------
+# Replace the following placeholders:
+# - <TUNNEL_UUID_OR_NAME> → Your tunnel UUID or name (e.g., vcal-tunnel)
+# - <PATH_TO_CREDENTIALS> → Path to credentials JSON file
+# - yourdomain.com → Your actual domain
+#
+# Step 5: Create DNS routes
+# --------------------------
+# cloudflared tunnel route dns vcal-tunnel api.yourdomain.com
+# cloudflared tunnel route dns vcal-tunnel app.yourdomain.com
+#
+# Step 6: Update environment variables
+# -------------------------------------
+# See .env.production.template for required changes
+#
+# Step 7: Run the tunnel
+# -----------------------
+# cloudflared tunnel run vcal-tunnel
+#
+# Or install as a system service:
+# Linux: sudo cloudflared service install
+# Windows: cloudflared.exe service install
+#
+# ===================================================================
+
+# Tunnel identifier (use tunnel name or UUID)
+tunnel: <TUNNEL_UUID_OR_NAME>
+
+# Path to credentials file (generated in Step 2)
+# Linux/macOS example: /home/username/.cloudflared/1234abcd-5678-efgh-9012-ijklmnopqrst.json
+# Windows example: C:\Users\username\.cloudflared\1234abcd-5678-efgh-9012-ijklmnopqrst.json
+credentials-file: <PATH_TO_CREDENTIALS>
+
+# Ingress rules: Map hostnames to local services
+ingress:
+  # Django Backend API
+  # Replace 'yourdomain.com' with your actual domain
+  - hostname: api.yourdomain.com
+    service: http://localhost:8000
+    originRequest:
+      noTLSVerify: true  # Allow self-signed certs in development
+      connectTimeout: 30s
+
+  # React Frontend (Vite dev server)
+  # Replace 'yourdomain.com' with your actual domain
+  - hostname: app.yourdomain.com
+    service: http://localhost:5173
+    originRequest:
+      noTLSVerify: true
+      connectTimeout: 30s
+
+  # Catch-all rule (required as last entry)
+  - service: http_status:404
+
+# Optional: Logging
+#loglevel: info  # Options: debug, info, warn, error
+
+# ===================================================================
+# EXAMPLE CONFIGURATION (for domain: mycaldemo.com)
+# ===================================================================
+#
+# tunnel: vcal-tunnel
+# credentials-file: /home/ben/.cloudflared/a1b2c3d4-e5f6-7890-abcd-ef1234567890.json
+#
+# ingress:
+#   - hostname: api.mycaldemo.com
+#     service: http://localhost:8000
+#     originRequest:
+#       noTLSVerify: true
+#
+#   - hostname: app.mycaldemo.com
+#     service: http://localhost:5173
+#     originRequest:
+#       noTLSVerify: true
+#
+#   - service: http_status:404
+#
+# ===================================================================
+# AFTER SETUP
+# ===================================================================
+#
+# Your permanent URLs will be:
+# - Frontend: https://app.yourdomain.com
+# - Backend API: https://api.yourdomain.com
+#
+# These URLs will NOT change when you restart cloudflared!
+#
+# Update your environment variables:
+# - backend/.env: GOOGLE_WEBHOOK_BASE_URL=https://api.yourdomain.com
+# - backend/.env: FRONTEND_APP_URL=https://app.yourdomain.com
+# - backend/.env: FRONTEND_TUNNEL=app.yourdomain.com
+# - backend/.env: BACKEND_TUNNEL=api.yourdomain.com
+# - frontend/.env: VITE_API_URL=https://api.yourdomain.com
+#
+# Update Google Cloud:
+# - OAuth Redirect URI: https://api.yourdomain.com/api/google/oauth/callback/
+# - Pub/Sub Webhook: https://api.yourdomain.com/api/gmail/webhook/
+#
+# ===================================================================
+# RUNNING THE TUNNEL
+# ===================================================================
+#
+# Development (manual start):
+# cloudflared tunnel run vcal-tunnel
+#
+# Production (as system service):
+# Linux:
+#   sudo cloudflared service install
+#   sudo systemctl start cloudflared
+#   sudo systemctl enable cloudflared  # Auto-start on boot
+#
+# Windows (run as Administrator):
+#   cloudflared.exe service install
+#   sc start cloudflared
+#   sc config cloudflared start=auto  # Auto-start on boot
+#
+# Check status:
+# Linux: sudo systemctl status cloudflared
+# Windows: sc query cloudflared
+#
+# View logs:
+# Linux: sudo journalctl -u cloudflared -f
+# Windows: Check Event Viewer or cloudflared logs directory
+#
+# ===================================================================
+# TROUBLESHOOTING
+# ===================================================================
+#
+# Issue: "tunnel credentials file not found"
+# Solution: Check credentials-file path is absolute and correct
+#
+# Issue: "failed to sufficiently increase receive buffer size"
+# Solution: This is a warning, not an error. Tunnel should still work.
+#
+# Issue: DNS not resolving
+# Solution: Wait 5-10 minutes for DNS propagation after creating routes
+#
+# Issue: 502 Bad Gateway
+# Solution: Ensure backend/frontend servers are running on correct ports
+#
+# Issue: Tunnel exits immediately
+# Solution: Check config.yml syntax (YAML is indent-sensitive!)
+#
+# ===================================================================
+# COST
+# ===================================================================
+#
+# FREE TIER:
+# - Unlimited bandwidth
+# - Unlimited concurrent tunnels
+# - Automatic HTTPS
+# - DDoS protection
+#
+# PAID FEATURES (not required for V-Cal):
+# - Access policies (Zero Trust)
+# - Advanced routing
+#
+# Domain registration: $10-15/year (from any registrar, transfer to Cloudflare)
+#
+# ===================================================================

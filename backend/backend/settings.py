@@ -29,15 +29,23 @@ if not SECRET_KEY:
         )
 
 # Cloudflare tunnel configuration
-# NOTE: These tunnel URLs change every time you restart cloudflared
-# Set them in environment variables (.env) or rely on wildcard .trycloudflare.com in DEBUG mode
+# TWO OPTIONS:
+# 1. Temporary tunnels (development): URLs change on every cloudflared restart
+#    - Use wildcard .trycloudflare.com in DEBUG mode (automatic)
+#    - No environment variables needed
+# 2. Permanent tunnels (production/demo): Fixed URLs that never change
+#    - Set FRONTEND_TUNNEL and BACKEND_TUNNEL in .env
+#    - See cloudflared-config.yml.template for setup instructions
 FRONTEND_TUNNEL = os.getenv("FRONTEND_TUNNEL", "")
 BACKEND_TUNNEL = os.getenv("BACKEND_TUNNEL", "")
 
-# In development, accept all trycloudflare.com subdomains (tunnel URLs change on restart)
+# ALLOWED_HOSTS configuration
 if DEBUG:
+    # Development: Accept localhost + all temporary trycloudflare.com subdomains
     ALLOWED_HOSTS = ["localhost", "127.0.0.1", ".trycloudflare.com"]
 else:
+    # Production: Only accept localhost + your specific permanent domain
+    # BACKEND_TUNNEL should be set in .env (e.g., api.yourdomain.com)
     ALLOWED_HOSTS = [host for host in (BACKEND_TUNNEL, "localhost", "127.0.0.1") if host]
 
 # --- Apps ---

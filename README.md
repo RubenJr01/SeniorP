@@ -1,7 +1,15 @@
 # V-Cal (SeniorP) – Local Development Manual
 
-This repository contains a Django REST backend and a Vite/React frontend that power **V-Cal**, a calendar and sortie-planning app with optional Google Calendar synchronisation.  
+This repository contains a Django REST backend and a Vite/React frontend that power **V-Cal**, a calendar and sortie-planning app with optional Google Calendar synchronisation.
 Use this guide as an end-to-end checklist for setting the project up on a fresh machine.
+
+## 📚 Documentation Quick Links
+
+- **📖 [Setup & Installation Guide](Instructions/SETUP_AND_INSTALLATION.md)** - Complete setup instructions from scratch
+- **▶️ [Running the Application](Instructions/RUNNING_THE_APPLICATION.md)** - How to start servers and use features
+- **🌐 [Cloudflared Tunnel Setup](Instructions/CLOUDFLARED_TUNNEL_SETUP.md)** - Temporary and permanent tunnel configuration
+- **🌐 [Gmail Auto-Parse Setup](backend/GMAIL_AUTO_PARSE_SETUP.md)** - Detailed setup for AI-powered email parsing
+- **🔧 [Architecture & Development](CLAUDE.md)** - Technical documentation for developers
 
 ---
 
